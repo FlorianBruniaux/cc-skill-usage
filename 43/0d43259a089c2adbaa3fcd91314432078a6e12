@@ -1,0 +1,27 @@
+.claude/skills/skill-usage-report/SKILL.md
+  s_60f3356745d00c::t_4794071d720b29 1-79
+CHANGELOG.md
+  s_60f3356745d00c::t_9816d58db1c170 10-26
+EXAMPLES.md
+  s_60f3356745d00c::t_b142160357a32e 1-119
+README.md
+  s_60f3356745d00c::t_8d31bc21a3ce7c 80-83
+cc-skill-usage
+  s_60f3356745d00c::t_08c4f343c5b2fa 22,484-487
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "430d43259a089c2adbaa3fcd91314432078a6e12",
+  "prompts": {},
+  "sessions": {
+    "s_60f3356745d00c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0dccbe59-4127-44e1-af58-efdf287a5bdb",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Florian BRUNIAUX <florian@bruniaux.com>"
+    }
+  }
+}
