@@ -1,0 +1,31 @@
+CHANGELOG.md
+  s_678d026c6fc78a::t_fc5c12e2b44e76 7-34
+README.md
+  s_678d026c6fc78a::t_cf07694e0c56ca 41,43,47-51,91-97
+cc-skill-usage
+  s_ac0334b288fed5::t_4be7e2680faac4 21,56-67,72-90,94-95,100,102-118,123-131,152,155,254-257,323,338-347,368-381,383,393,407-411,430-433,436-438,466,468
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "193679a5c1987415e8fcc1b6518d9ce388fbc4c6",
+  "prompts": {},
+  "sessions": {
+    "s_678d026c6fc78a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "48ae19de-ed31-4ddb-992b-17432937c2fe",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Florian BRUNIAUX <florian@bruniaux.com>"
+    },
+    "s_ac0334b288fed5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b3298e97-02bb-45fc-ab93-6a257a4ea74d",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Florian BRUNIAUX <florian@bruniaux.com>"
+    }
+  }
+}
