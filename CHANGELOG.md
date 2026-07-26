@@ -7,6 +7,23 @@ that triggered each one. All notable changes are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/), and the project
 adheres to semantic versioning.
 
+## [0.2.3] - 2026-07-26
+
+### Added
+- `EXAMPLES.md`: scenarios matched to the exact command that answers them
+  (monthly recap, one repo versus everything else, scripting with `--json`,
+  cross-checking a count that looks wrong), linked from the README.
+- `.claude/skills/skill-usage-report/`: a Skill that runs and interprets
+  `cc-skill-usage` output, including the cross-verification step against an
+  independent `grep`+`jq` pipeline whenever a count looks off, and the known
+  blind spots to disclose rather than paper over.
+
+### Fixed
+- `--help` for `--show-context` still described the old fixed-width table
+  layout ("an extra column on the leaderboard") after it was replaced by a
+  block-per-skill layout in 0.2.2. Wording corrected to match the actual
+  output.
+
 ## [0.2.2] - 2026-07-26
 
 ### Fixed

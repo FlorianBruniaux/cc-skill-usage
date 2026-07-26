@@ -77,6 +77,10 @@ cc-skill-usage --show-context       # show what triggered each invocation
 cc-skill-usage --json               # machine-readable output for any command above
 ```
 
+See [EXAMPLES.md](EXAMPLES.md) for concrete scenarios (a monthly recap, one
+repo versus everything else, scripting with `--json`, cross-checking a
+count that looks wrong) matched to the exact command that answers them.
+
 ### Filtering by project, including worktrees
 
 `--project` matches against both the session's cwd basename and the encoded

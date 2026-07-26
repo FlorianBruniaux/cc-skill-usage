@@ -19,7 +19,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-VERSION = "0.2.2"
+VERSION = "0.2.3"
 
 PROJECTS_DIR = Path(
     os.environ.get("CC_PROJECTS_DIR", Path.home() / ".claude" / "projects")
@@ -481,9 +481,10 @@ def build_parser():
                    help="also count invocations made inside subagents")
     p.add_argument("--show-context", action="store_true",
                    help="show the user message that preceded each invocation: "
-                        "an extra column on the leaderboard (most recent per "
-                        "skill), a full recent-invocations section in detail "
-                        "view, and inline in --all recent")
+                        "an indented context line under each skill on the "
+                        "leaderboard (most recent per skill), a full "
+                        "recent-invocations section in detail view, and "
+                        "inline in --all recent")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.add_argument("--no-cache", action="store_true",
                    help="parse everything fresh, ignore and do not write the cache")
