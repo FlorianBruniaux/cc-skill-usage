@@ -18,7 +18,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 
 PROJECTS_DIR = Path(
     os.environ.get("CC_PROJECTS_DIR", Path.home() / ".claude" / "projects")
@@ -31,7 +31,7 @@ CACHE_DIR = Path(
     )
 )
 CACHE_FILE = CACHE_DIR / "index.json"
-CACHE_SCHEMA = 1
+CACHE_SCHEMA = 2
 
 
 # --------------------------------------------------------------------------
@@ -275,11 +275,13 @@ def fmt_day(ts):
 # Views
 # --------------------------------------------------------------------------
 
-def view_leaderboard(events, as_json):
+def view_leaderboard(events, as_json, show_context=False):
     counts = Counter(e["skill"] for e in events)
     projects = defaultdict(set)
     first = {}
     last = {}
+    most_recent = {}  # skill -> (dt, event), for the last-context column
+
     for e in events:
         projects[e["skill"]].add(e["project"])
         day = fmt_day(e["ts"])
@@ -288,16 +290,33 @@ def view_leaderboard(events, as_json):
                 first[e["skill"]] = day
             if e["skill"] not in last or day > last[e["skill"]]:
                 last[e["skill"]] = day
+        dt = parse_ts(e["ts"])
+        if dt is not None:
+            prev = most_recent.get(e["skill"])
+            if prev is None or dt > prev[0]:
+                most_recent[e["skill"]] = (dt, e)
 
     rows = []
     for skill, n in counts.most_common():
-        rows.append({
+        row = {
             "skill": skill,
             "invocations": n,
             "projects": len(projects[skill]),
             "first_seen": first.get(skill, "unknown"),
             "last_seen": last.get(skill, "unknown"),
-        })
+        }
+        if show_context:
+            recent = most_recent.get(skill)
+            if recent:
+                _, e = recent
+                row["last_context"] = e["context"]
+                row["last_context_project"] = e["project"]
+                row["last_context_session"] = e["session"]
+            else:
+                row["last_context"] = None
+                row["last_context_project"] = None
+                row["last_context_session"] = None
+        rows.append(row)
 
     if as_json:
         print(json.dumps({
@@ -312,11 +331,25 @@ def view_leaderboard(events, as_json):
         return
 
     wname = max(len("SKILL"), max(len(r["skill"]) for r in rows))
-    print(f"{'SKILL':<{wname}}  {'INVOC':>5}  {'PROJ':>4}  {'FIRST':>10}  {'LAST':>10}")
-    print(f"{'-' * wname}  {'-'*5}  {'-'*4}  {'-'*10}  {'-'*10}")
-    for r in rows:
-        print(f"{r['skill']:<{wname}}  {r['invocations']:>5}  {r['projects']:>4}  "
-              f"{r['first_seen']:>10}  {r['last_seen']:>10}")
+
+    if not show_context:
+        print(f"{'SKILL':<{wname}}  {'INVOC':>5}  {'PROJ':>4}  {'FIRST':>10}  {'LAST':>10}")
+        print(f"{'-' * wname}  {'-'*5}  {'-'*4}  {'-'*10}  {'-'*10}")
+        for r in rows:
+            print(f"{r['skill']:<{wname}}  {r['invocations']:>5}  {r['projects']:>4}  "
+                  f"{r['first_seen']:>10}  {r['last_seen']:>10}")
+    else:
+        print(f"{'SKILL':<{wname}}  {'INVOC':>5}  {'PROJ':>4}  {'LAST':>10}  "
+              f"{'PROJECT':<20}  LAST CONTEXT")
+        print(f"{'-' * wname}  {'-'*5}  {'-'*4}  {'-'*10}  {'-'*20}  {'-'*40}")
+        for r in rows:
+            ctx = r["last_context"] or "(no preceding user message found)"
+            if len(ctx) > 70:
+                ctx = ctx[:67] + "..."
+            proj = (r["last_context_project"] or "")[:20]
+            print(f"{r['skill']:<{wname}}  {r['invocations']:>5}  {r['projects']:>4}  "
+                  f"{r['last_seen']:>10}  {proj:<20}  {ctx}")
+
     print(f"\n{sum(counts.values())} invocations across {len(counts)} skills.")
 
 
@@ -434,8 +467,10 @@ def build_parser():
     p.add_argument("--include-subagents", action="store_true",
                    help="also count invocations made inside subagents")
     p.add_argument("--show-context", action="store_true",
-                   help="show the last user message preceding each invocation "
-                        "(detail and --all recent views only)")
+                   help="show the user message that preceded each invocation: "
+                        "an extra column on the leaderboard (most recent per "
+                        "skill), a full recent-invocations section in detail "
+                        "view, and inline in --all recent")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.add_argument("--no-cache", action="store_true",
                    help="parse everything fresh, ignore and do not write the cache")
@@ -467,7 +502,7 @@ def main(argv=None):
     elif args.skill:
         view_detail(events, args.skill, args.json, show_context=args.show_context)
     else:
-        view_leaderboard(events, args.json)
+        view_leaderboard(events, args.json, show_context=args.show_context)
 
     if not args.json and os.environ.get("CC_SKILL_USAGE_TIMING"):
         sys.stderr.write(f"\nscanned in {elapsed:.2f}s\n")

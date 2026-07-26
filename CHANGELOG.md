@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 semantic versioning.
 
+## [0.2.1] - 2026-07-26
+
+### Fixed
+- `KeyError: 'context'` crash for anyone with a cache built by 0.1.x. The
+  event dict grew `context` and `repo_hint` fields in 0.2.0 but the cache
+  schema version was never bumped, so an existing `~/.cache/cc-skill-usage/`
+  from before the update kept getting reused as-is (still keyed only by file
+  mtime, which hadn't changed) and crashed on the missing keys the moment
+  `--show-context` touched them. `CACHE_SCHEMA` bumped to 2 so any pre-0.2.0
+  cache is discarded and rebuilt on the next run instead of crashing.
+- `--show-context` was silently ignored on the plain leaderboard view (no
+  skill argument, no `--all`): the flag only reached `view_detail` and
+  `view_recent`, so running `cc-skill-usage --since 30d --show-context` printed
+  the exact same table as without the flag, no error, no hint. Now the
+  leaderboard itself grows a `LAST CONTEXT` column (and `PROJECT`) showing the
+  most recent invocation's preceding user message for every skill in one
+  table, so a full exhaustive per-skill context recap no longer requires
+  querying each skill one at a time via the detail view.
+
 ## [0.2.0] - 2026-07-26
 
 ### Added

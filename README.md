@@ -63,6 +63,18 @@ flow-lean                              7     5  2026-07-23  2026-07-25
 211 invocations across 69 skills.
 ```
 
+Add `--show-context` to the leaderboard for a one-shot, every-skill recap that
+also shows the last thing that triggered each skill:
+
+```
+$ cc-skill-usage --since 30d --show-context
+SKILL                              INVOC  PROJ        LAST  PROJECT     LAST CONTEXT
+----------------------------------  -----  ----  ----------  ----------  ----------------------------------------
+critique-plan                          11     6  2026-07-23  app         @"system-architect" @"backend-architect"...
+tdd                                    11     6  2026-07-24  app         Déjà le 2, les fix sécu
+...
+```
+
 ```
 $ cc-skill-usage flow-lean
 flow-lean: 7 invocations across 7 sessions
