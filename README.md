@@ -38,10 +38,16 @@ cc-skill-usage                     # leaderboard: every skill, counts, projects,
 cc-skill-usage flow-lean           # detail for one skill: by project, by argument, daily histogram
 cc-skill-usage --all recent 20     # the 20 most recent invocations, newest first
 cc-skill-usage --since 7d          # only the last 7 days (also 24h, 2w, or a YYYY-MM-DD date)
-cc-skill-usage --project app       # filter by project (substring match on the cwd basename)
+cc-skill-usage --project myrepo    # filter by project: matches every worktree of that repo too
 cc-skill-usage --include-subagents # also count invocations made inside subagents (off by default)
+cc-skill-usage --show-context      # show the user message that preceded each invocation
 cc-skill-usage --json              # machine-readable output for any command above
 ```
+
+`--project` matches against both the session's cwd basename and the encoded
+project directory, so one needle (e.g. `--project myrepo`) catches every
+worktree of that repo, even though each worktree's cwd basename is its own
+branch name (`fix-issue-123`, `feature-x`, ...) rather than the repo name.
 
 ### Example
 
@@ -81,6 +87,13 @@ record. The tool walks `record.message.content[]` and keeps the blocks where
 (sometimes namespaced, e.g. `cowork:update-releases`), the optional level is
 `input.args`, the timestamp is the record `timestamp`, and the project is the
 basename of the record `cwd`.
+
+With `--show-context`, the tool also tracks the last `role: user` text message
+seen before each invocation in the same transcript, to show what prompted it.
+Tool results (file reads, command output) are stored as `role: user` messages
+too and can be megabytes long, so any such record longer than 20KB or carrying
+a `tool_result` block is skipped without full parsing rather than risking a
+slow, memory-heavy scan on a large repo's transcripts.
 
 Results are cached in `~/.cache/cc-skill-usage/index.json`, keyed by file mtime.
 The first run parses everything (a few seconds for ~2000 sessions), later runs

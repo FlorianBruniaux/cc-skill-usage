@@ -18,7 +18,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 PROJECTS_DIR = Path(
     os.environ.get("CC_PROJECTS_DIR", Path.home() / ".claude" / "projects")
@@ -53,22 +53,81 @@ def project_from_record(record, jsonl_path):
         return jsonl_path.parent.name
 
 
+def repo_hint_from_path(jsonl_path):
+    """Encoded top-level project dir. Stable across worktrees of the same repo
+    (e.g. every '.../MethodeAristote-app--worktrees-<branch>' session shares the
+    'MethodeAristote-app' substring), unlike the cwd basename which is the
+    worktree's branch-named leaf directory."""
+    try:
+        rel = jsonl_path.relative_to(PROJECTS_DIR)
+        return rel.parts[0]
+    except ValueError:
+        return jsonl_path.parent.name
+
+
 def is_subagent(jsonl_path):
     return "subagents" in jsonl_path.parts
+
+
+def extract_text(message):
+    """Best-effort plain text from a user/assistant message, for context display."""
+    if not isinstance(message, dict):
+        return None
+    content = message.get("content")
+    if isinstance(content, str):
+        text = content
+    elif isinstance(content, list):
+        parts = [
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        ]
+        text = " ".join(p for p in parts if p)
+    else:
+        return None
+    text = " ".join(text.split())
+    return text[:200] if text else None
 
 
 def parse_file(jsonl_path):
     """Yield one event dict per real Skill invocation found in a transcript."""
     subagent = is_subagent(jsonl_path)
+    repo_hint = repo_hint_from_path(jsonl_path)
+    last_user_text = None
     try:
         with jsonl_path.open("r", encoding="utf-8", errors="replace") as fh:
             for line in fh:
                 line = line.strip()
-                if not line or '"Skill"' not in line:
+                if not line:
                     continue
+                has_skill = False
+                is_user_line = '"type":"user"' in line or '"type": "user"' in line
+                if is_user_line:
+                    # A Skill tool_use only ever appears in an assistant record,
+                    # never a user one, so has_skill is irrelevant here even if
+                    # the line happens to contain that substring (e.g. a tool
+                    # result dumping a file that quotes a Skill JSON example).
+                    # Tool results are stored as role "user" too and can be
+                    # megabytes long (a full file read, a command output), so
+                    # skip json.loads on them outright instead of paying to
+                    # deserialize a huge blob just to look for a short prompt.
+                    if '"tool_result"' in line or len(line) > 20000:
+                        continue
+                else:
+                    has_skill = '"name":"Skill"' in line or '"name": "Skill"' in line
+                    if not has_skill:
+                        continue
                 try:
                     record = json.loads(line)
                 except (ValueError, json.JSONDecodeError):
+                    continue
+
+                if record.get("type") == "user":
+                    text = extract_text(record.get("message"))
+                    if text:
+                        last_user_text = text
+                    continue
+
+                if not has_skill:
                     continue
                 message = record.get("message")
                 if not isinstance(message, dict):
@@ -90,8 +149,10 @@ def parse_file(jsonl_path):
                         "args": inp.get("args"),
                         "ts": record.get("timestamp"),
                         "project": project_from_record(record, jsonl_path),
+                        "repo_hint": repo_hint,
                         "session": jsonl_path.stem,
                         "subagent": subagent,
+                        "context": last_user_text,
                     }
     except (OSError, IOError):
         return
@@ -190,7 +251,10 @@ def apply_filters(events, args):
         out = [e for e in out if not e["subagent"]]
     if args.project:
         needle = args.project.lower()
-        out = [e for e in out if needle in e["project"].lower()]
+        out = [
+            e for e in out
+            if needle in e["project"].lower() or needle in e["repo_hint"].lower()
+        ]
     if args.since:
         floor = parse_since(args.since)
         kept = []
@@ -256,7 +320,7 @@ def view_leaderboard(events, as_json):
     print(f"\n{sum(counts.values())} invocations across {len(counts)} skills.")
 
 
-def view_detail(events, skill, as_json):
+def view_detail(events, skill, as_json, show_context=False):
     hits = [e for e in events if e["skill"] == skill]
     by_project = Counter(e["project"] for e in hits)
     by_day = Counter(fmt_day(e["ts"]) for e in hits)
@@ -271,6 +335,16 @@ def view_detail(events, skill, as_json):
             "by_project": dict(by_project.most_common()),
             "by_day": dict(sorted(by_day.items())),
             "by_args": dict(by_args.most_common()),
+            "recent": [
+                {
+                    "ts": e["ts"], "project": e["project"], "session": e["session"],
+                    "args": e["args"], "context": e["context"],
+                }
+                for e in sorted(
+                    (e for e in hits if parse_ts(e["ts"]) is not None),
+                    key=lambda e: parse_ts(e["ts"]), reverse=True,
+                )[:20]
+            ],
         }, indent=2))
         return
 
@@ -291,8 +365,22 @@ def view_detail(events, skill, as_json):
         bar = "#" * min(n, 40)
         print(f"  {day}  {n:>3}  {bar}")
 
+    if show_context:
+        dated = sorted(
+            (e for e in hits if parse_ts(e["ts"]) is not None),
+            key=lambda e: parse_ts(e["ts"]), reverse=True,
+        )
+        print(f"\nRecent invocations (context = last user message before the call):")
+        for e in dated[:10]:
+            dt = parse_ts(e["ts"])
+            when = dt.strftime("%Y-%m-%d %H:%M")
+            sid = e["session"][:8]
+            ctx = e["context"] or "(no preceding user message found)"
+            print(f"  {when}  {e['project']}  session {sid}")
+            print(f"    -> {ctx}")
 
-def view_recent(events, limit, as_json):
+
+def view_recent(events, limit, as_json, show_context=False):
     dated = [(parse_ts(e["ts"]), e) for e in events]
     dated = [(dt, e) for dt, e in dated if dt is not None]
     dated.sort(key=lambda x: x[0], reverse=True)
@@ -302,7 +390,7 @@ def view_recent(events, limit, as_json):
         print(json.dumps([{
             "ts": e["ts"], "skill": e["skill"], "args": e["args"],
             "project": e["project"], "session": e["session"],
-            "subagent": e["subagent"],
+            "subagent": e["subagent"], "context": e["context"],
         } for e in picked], indent=2))
         return
 
@@ -316,7 +404,11 @@ def view_recent(events, limit, as_json):
         when = dt.strftime("%Y-%m-%d %H:%M") if dt else "unknown"
         tag = " (subagent)" if e["subagent"] else ""
         arg = f" [{e['args']}]" if e["args"] else ""
-        print(f"{when}  {e['skill']:<{wname}}{arg}  {e['project']}{tag}")
+        sid = e["session"][:8]
+        print(f"{when}  {e['skill']:<{wname}}{arg}  {e['project']}{tag}  session {sid}")
+        if show_context:
+            ctx = e["context"] or "(no preceding user message found)"
+            print(f"  -> {ctx}")
 
 
 # --------------------------------------------------------------------------
@@ -335,9 +427,15 @@ def build_parser():
     p.add_argument("--since", metavar="WINDOW",
                    help="time filter: 7d, 24h, 2w, or a date YYYY-MM-DD")
     p.add_argument("--project", metavar="NAME",
-                   help="filter by project (substring match on the cwd basename)")
+                   help="filter by project: substring match on the cwd basename "
+                        "OR the encoded project directory, so one repo's worktrees "
+                        "(different branch-named cwd) match a single needle, e.g. "
+                        "--project aristote")
     p.add_argument("--include-subagents", action="store_true",
                    help="also count invocations made inside subagents")
+    p.add_argument("--show-context", action="store_true",
+                   help="show the last user message preceding each invocation "
+                        "(detail and --all recent views only)")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.add_argument("--no-cache", action="store_true",
                    help="parse everything fresh, ignore and do not write the cache")
@@ -365,9 +463,9 @@ def main(argv=None):
         except ValueError:
             sys.stderr.write(f"N must be an integer, got {n!r}.\n")
             return 2
-        view_recent(events, limit, args.json)
+        view_recent(events, limit, args.json, show_context=args.show_context)
     elif args.skill:
-        view_detail(events, args.skill, args.json)
+        view_detail(events, args.skill, args.json, show_context=args.show_context)
     else:
         view_leaderboard(events, args.json)
 
