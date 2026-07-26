@@ -7,6 +7,17 @@ that triggered each one. All notable changes are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/), and the project
 adheres to semantic versioning.
 
+## [Unreleased]
+
+### Added
+- `prompts/scenario-tour.md`: a ready-to-paste prompt that smoke-tests every
+  scenario in `EXAMPLES.md` against real data and flags any drift between
+  documented and actual behavior.
+- `prompts/deep-dive-report.md`: a ready-to-paste prompt for a multi-agent
+  session that crosses `cc-skill-usage` usage data with the `eval-skills`
+  quality audit, producing quadrant tables (high/low usage x high/low
+  quality) and impact-ranked, verified fixes.
+
 ## [0.2.3] - 2026-07-26
 
 ### Added

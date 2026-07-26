@@ -81,6 +81,13 @@ See [EXAMPLES.md](EXAMPLES.md) for concrete scenarios (a monthly recap, one
 repo versus everything else, scripting with `--json`, cross-checking a
 count that looks wrong) matched to the exact command that answers them.
 
+Two ready-to-paste prompts for a fresh Claude Code session live in
+[prompts/](prompts/): [`scenario-tour.md`](prompts/scenario-tour.md) smoke-
+tests every scenario in EXAMPLES.md against real data, and
+[`deep-dive-report.md`](prompts/deep-dive-report.md) runs a multi-agent
+audit crossing usage data with the `eval-skills` quality audit, producing a
+report with quadrant tables and impact-ranked fixes.
+
 ### Filtering by project, including worktrees
 
 `--project` matches against both the session's cwd basename and the encoded
