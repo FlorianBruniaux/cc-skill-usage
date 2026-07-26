@@ -1,0 +1,27 @@
+.gitignore
+  s_eaa7b024c41dd5::t_93ba47327a8e0f 1-5
+CHANGELOG.md
+  s_eaa7b024c41dd5::t_8c785d8afe5950 1-27
+LICENSE
+  s_eaa7b024c41dd5::t_fca51fca57eb23 1-21
+README.md
+  s_eaa7b024c41dd5::t_edb88761416564 1-112
+cc-skill-usage
+  s_eaa7b024c41dd5::t_7b10874c2d6e59 1-380
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "689dc521343c90d03e0b316427007dfedef18f41",
+  "prompts": {},
+  "sessions": {
+    "s_eaa7b024c41dd5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a48d0498-cb25-4b2d-ae23-61afb07f378f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Florian BRUNIAUX <florian@bruniaux.com>"
+    }
+  }
+}
