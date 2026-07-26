@@ -1,8 +1,22 @@
 # Changelog
 
-All notable changes to this project are documented here. The format follows
-[Keep a Changelog](https://keepachangelog.com/), and the project adheres to
-semantic versioning.
+`cc-skill-usage` is a single-file CLI that reads Claude Code's own JSONL
+transcripts under `~/.claude/projects/` and reports which Skills you actually
+invoked: counts, timing, projects, and (with `--show-context`) the message
+that triggered each one. All notable changes are documented here. The format
+follows [Keep a Changelog](https://keepachangelog.com/), and the project
+adheres to semantic versioning.
+
+## [0.2.2] - 2026-07-26
+
+### Fixed
+- The `--show-context` leaderboard was unreadable in a real terminal: skill
+  name, counts, a project name, and a free-text context crammed into one
+  fixed-width table row either truncated the context mid-word or wrapped
+  unpredictably depending on terminal width, confirmed against real output
+  during use. Replaced with a block-per-skill layout (one stats line, one
+  indented context line) that adapts to the actual terminal width via
+  `shutil.get_terminal_size()` instead of assuming a fixed one.
 
 ## [0.2.1] - 2026-07-26
 

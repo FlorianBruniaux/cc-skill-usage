@@ -12,13 +12,14 @@ Single file, Python 3 standard library only. No external dependencies.
 import argparse
 import json
 import os
+import shutil
 import sys
 import time
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 
 PROJECTS_DIR = Path(
     os.environ.get("CC_PROJECTS_DIR", Path.home() / ".claude" / "projects")
@@ -339,16 +340,28 @@ def view_leaderboard(events, as_json, show_context=False):
             print(f"{r['skill']:<{wname}}  {r['invocations']:>5}  {r['projects']:>4}  "
                   f"{r['first_seen']:>10}  {r['last_seen']:>10}")
     else:
-        print(f"{'SKILL':<{wname}}  {'INVOC':>5}  {'PROJ':>4}  {'LAST':>10}  "
-              f"{'PROJECT':<20}  LAST CONTEXT")
-        print(f"{'-' * wname}  {'-'*5}  {'-'*4}  {'-'*10}  {'-'*20}  {'-'*40}")
+        # Cramming skill / counts / project / a free-text context into one
+        # fixed-width row breaks down: the context length varies wildly and
+        # either truncates mid-word or wraps unpredictably depending on the
+        # terminal. A block per skill (stat line, then an indented context
+        # line) survives any terminal width and any context length instead.
+        width = shutil.get_terminal_size(fallback=(100, 24)).columns
+        ctx_width = max(40, width - 4)
         for r in rows:
+            plural = "s" if r["invocations"] != 1 else ""
+            header = (
+                f"{r['skill']}  ({r['invocations']} invocation{plural}, "
+                f"{r['projects']} project{'s' if r['projects'] != 1 else ''}, "
+                f"last {r['last_seen']}"
+            )
+            if r["last_context_project"]:
+                header += f", in {r['last_context_project']}"
+            header += ")"
+            print(header)
             ctx = r["last_context"] or "(no preceding user message found)"
-            if len(ctx) > 70:
-                ctx = ctx[:67] + "..."
-            proj = (r["last_context_project"] or "")[:20]
-            print(f"{r['skill']:<{wname}}  {r['invocations']:>5}  {r['projects']:>4}  "
-                  f"{r['last_seen']:>10}  {proj:<20}  {ctx}")
+            if len(ctx) > ctx_width:
+                ctx = ctx[:ctx_width - 3] + "..."
+            print(f"  -> {ctx}")
 
     print(f"\n{sum(counts.values())} invocations across {len(counts)} skills.")
 

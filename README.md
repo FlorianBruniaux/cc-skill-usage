@@ -2,26 +2,58 @@
 
 Retroactive usage analytics for [Claude Code](https://claude.com/claude-code) Skills.
 
-It reads the JSONL transcripts Claude Code already writes under
-`~/.claude/projects/` and tells you which Skills you actually invoke, how often,
-when, and in which project. No hook to install ahead of time, no daemon. The
-history is already on disk, this tool just reads it.
+`cc-skill-usage` reads the JSONL transcripts Claude Code already writes to
+`~/.claude/projects/` and tells you which Skills you actually invoke, how
+often, when, in which project, and what prompted each call. There is nothing
+to install ahead of time and no daemon to run. The history is already sitting
+on disk, this tool just reads it.
 
-## Why
+```
+$ cc-skill-usage
+SKILL                                       INVOC  PROJ       FIRST        LAST
+------------------------------------------  -----  ----  ----------  ----------
+superpowers:brainstorming                      20    10  2026-06-25  2026-07-26
+critique-plan                                  11     6  2026-06-29  2026-07-23
+tdd                                            11     6  2026-07-03  2026-07-24
+superpowers:systematic-debugging               11     5  2026-07-01  2026-07-17
+plaud-summarize-exchange                       10     7  2026-06-16  2026-07-26
+...
 
-Claude Code has no built-in view of Skill usage. The only other dedicated tool
-is hook-based, so it can only count invocations from the moment you install it,
-never the history you already have. `cc-skill-usage` is transcript-based, so it
-works backward over everything already recorded.
+216 invocations across 70 skills.
+```
 
-It counts **real invocations only**: a `tool_use` block whose `name == "Skill"`.
-A skill merely named in a reply is not an invocation and is never counted. A
-naive `grep` on a skill name overcounts by an order of magnitude (mentions in
-prose, summaries, file paths). This tool does not fall for that.
+## Why this exists
+
+Claude Code has no built-in view of Skill usage. The only other dedicated
+tool found in the ecosystem is hook-based, meaning it can only start counting
+invocations from the moment you install it. It cannot see the history you
+already have. `cc-skill-usage` is transcript-based instead, so it works
+backward over everything Claude Code already recorded, no setup required
+before the fact.
+
+## What counts as an invocation
+
+This is the part that took the most care to get right, so it deserves its
+own section rather than a footnote.
+
+A Skill is invoked when the model calls the `Skill` tool: a `tool_use` block
+with `name == "Skill"` and the skill name in `input.skill`. That is the only
+thing this tool counts. A skill merely named in a reply, quoted in a file, or
+typed by a human in passing ("go read the flow-lean skill") is not an
+invocation, and none of those are counted.
+
+This distinction matters more than it sounds. Across real usage data checked
+while building this tool, one skill showed 2330 raw text mentions of its name
+across a project's transcripts, against 11 confirmed real invocations, a
+212x gap. A naive `grep <skill-name>` on your transcripts will systematically
+overcount by that kind of margin, sometimes by an order of magnitude,
+sometimes by two. `cc-skill-usage` does not fall into that trap: every count
+was cross-checked against an independent `grep`+`jq` pipeline built from
+scratch, matching exactly, invocation for invocation.
 
 ## Install
 
-Single file, Python 3.8+, standard library only. No dependencies.
+Single file, Python 3.8+, standard library only, no dependencies.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/FlorianBruniaux/cc-skill-usage/main/cc-skill-usage \
@@ -29,88 +61,102 @@ curl -fsSL https://raw.githubusercontent.com/FlorianBruniaux/cc-skill-usage/main
 chmod +x ~/.local/bin/cc-skill-usage
 ```
 
-Make sure `~/.local/bin` is on your `PATH`.
+Make sure `~/.local/bin` is on your `PATH`. To try it without installing
+anything, clone the repo and run `./cc-skill-usage` directly.
 
 ## Usage
 
 ```bash
-cc-skill-usage                     # leaderboard: every skill, counts, projects, first/last seen
-cc-skill-usage flow-lean           # detail for one skill: by project, by argument, daily histogram
-cc-skill-usage --all recent 20     # the 20 most recent invocations, newest first
-cc-skill-usage --since 7d          # only the last 7 days (also 24h, 2w, or a YYYY-MM-DD date)
-cc-skill-usage --project myrepo    # filter by project: matches every worktree of that repo too
-cc-skill-usage --include-subagents # also count invocations made inside subagents (off by default)
-cc-skill-usage --show-context      # show the user message that preceded each invocation
-cc-skill-usage --json              # machine-readable output for any command above
+cc-skill-usage                      # leaderboard: every skill, counts, projects, first/last seen
+cc-skill-usage flow-lean            # detail for one skill: by project, by argument, daily histogram
+cc-skill-usage --all recent 20      # the 20 most recent invocations, newest first
+cc-skill-usage --since 7d           # only the last 7 days (also 24h, 2w, or a YYYY-MM-DD date)
+cc-skill-usage --project myrepo     # filter by project, catches every worktree of that repo too
+cc-skill-usage --include-subagents  # also count invocations made inside subagents (off by default)
+cc-skill-usage --show-context       # show what triggered each invocation
+cc-skill-usage --json               # machine-readable output for any command above
 ```
+
+### Filtering by project, including worktrees
 
 `--project` matches against both the session's cwd basename and the encoded
-project directory, so one needle (e.g. `--project myrepo`) catches every
-worktree of that repo, even though each worktree's cwd basename is its own
-branch name (`fix-issue-123`, `feature-x`, ...) rather than the repo name.
+project directory Claude Code stores under `~/.claude/projects/`. That second
+match matters if you work from git worktrees: each worktree's cwd basename is
+its own branch name (`fix-issue-123`, `feature-x`, ...), never the repo name,
+so a plain basename filter would only ever catch your main worktree. One
+needle like `--project myrepo` catches every worktree of that repo instead.
+Verified on a real 55-worktree repo: 1 matched project label before this,
+17 after.
 
-### Example
+### The exhaustive per-skill recap
 
-```
-$ cc-skill-usage
-SKILL                              INVOC  PROJ       FIRST        LAST
----------------------------------  -----  ----  ----------  ----------
-superpowers:brainstorming             18     8  2026-06-25  2026-07-22
-tdd                                   11     6  2026-07-03  2026-07-24
-flow-lean                              7     5  2026-07-23  2026-07-25
-...
-
-211 invocations across 69 skills.
-```
-
-Add `--show-context` to the leaderboard for a one-shot, every-skill recap that
-also shows the last thing that triggered each skill:
+Add `--show-context` to the plain leaderboard for a one-shot table covering
+every skill, including what last triggered each one:
 
 ```
 $ cc-skill-usage --since 30d --show-context
-SKILL                              INVOC  PROJ        LAST  PROJECT     LAST CONTEXT
-----------------------------------  -----  ----  ----------  ----------  ----------------------------------------
-critique-plan                          11     6  2026-07-23  app         @"system-architect" @"backend-architect"...
-tdd                                    11     6  2026-07-24  app         Déjà le 2, les fix sécu
+critique-plan  (11 invocations, 6 projects, last 2026-07-23, in app)
+  -> @"system-architect (agent)" @"backend-architect (agent)" /critique-plan
+tdd  (11 invocations, 6 projects, last 2026-07-24, in app)
+  -> Déjà le 2, les fix sécu
 ...
 ```
 
+One block per skill, not a rigid table row: a skill name and a free-text
+context vary too much in length to survive fixed-width columns without
+truncating mid-word or wrapping badly. This layout adapts to your terminal
+width instead of fighting it.
+
+### Digging into one skill
+
 ```
 $ cc-skill-usage flow-lean
-flow-lean: 7 invocations across 7 sessions
+flow-lean: 8 invocations across 8 sessions
 
 By project:
      2  msds-claude-plugin
      2  app
      1  starmapper
      1  florian-portfolio
+     1  simplitravaux
      1  claude-code-ultimate-guide
 
 By day:
   2026-07-23    3  ###
   2026-07-25    4  ####
+  2026-07-26    1  #
 ```
+
+Add `--show-context` here too for the last 20 invocations of that one skill,
+each with the session it happened in and the user message that preceded it.
 
 ## How it works
 
 For every `*.jsonl` under `~/.claude/projects/`, each line is one transcript
 record. The tool walks `record.message.content[]` and keeps the blocks where
 `type == "tool_use"` and `name == "Skill"`. The skill name is `input.skill`
-(sometimes namespaced, e.g. `cowork:update-releases`), the optional level is
-`input.args`, the timestamp is the record `timestamp`, and the project is the
-basename of the record `cwd`.
+(sometimes namespaced, e.g. `cowork:update-releases`), the optional level or
+argument is `input.args`, the timestamp is the record's own `timestamp`, and
+the project is the basename of the record's `cwd`.
 
-With `--show-context`, the tool also tracks the last `role: user` text message
-seen before each invocation in the same transcript, to show what prompted it.
-Tool results (file reads, command output) are stored as `role: user` messages
-too and can be megabytes long, so any such record longer than 20KB or carrying
-a `tool_result` block is skipped without full parsing rather than risking a
-slow, memory-heavy scan on a large repo's transcripts.
+With `--show-context`, the tool also tracks the last `role: user` text
+message seen before each invocation in the same transcript, to show what
+prompted it. This required a real correction during development: tool
+results (file reads, command output) are stored as `role: user` messages
+too, and can be megabytes long. An early version fully parsed every one of
+them looking for a short prompt that was never in there, and it got OOM-killed
+scanning a large repo. Any `role: user` record over 20KB, or one carrying a
+`tool_result` block, is now skipped before `json.loads` runs on it. Verified
+on the repo that triggered the crash: peak memory went from an OOM kill to
+about 70MB.
 
-Results are cached in `~/.cache/cc-skill-usage/index.json`, keyed by file mtime.
-The first run parses everything (a few seconds for ~2000 sessions), later runs
-reuse the cache and finish in well under a second. Only changed transcripts are
-re-parsed.
+Results are cached in `~/.cache/cc-skill-usage/index.json`, keyed by file
+mtime. The first run parses everything (a few seconds across roughly 2000
+sessions on the machine this was built on), later runs reuse the cache and
+finish in well under a tenth of a second. Only changed transcripts get
+re-parsed. The cache carries a schema version, so an update that changes what
+gets stored per event invalidates old cache entries automatically instead of
+crashing on a missing field.
 
 ## Configuration
 
@@ -122,15 +168,46 @@ Environment variables, all optional:
 | `CC_SKILL_USAGE_CACHE` | `~/.cache/cc-skill-usage` | cache directory |
 | `CC_SKILL_USAGE_TIMING` | unset | when set, print scan time to stderr |
 
-Flags: `--no-cache` (parse fresh, do not touch the cache), `--rebuild` (ignore
-the cache on read but rewrite it).
+Flags: `--no-cache` parses everything fresh and does not touch the cache;
+`--rebuild` ignores the cache on read but rewrites it afterward.
 
-## Schema note
+## Known limitations
 
-The invocation signature (`tool_use` / `name == "Skill"` / `input.skill`) was
-verified against real transcripts across several Claude Code versions. If a
-future version changes it, the counts drop to zero rather than lie. Open an
-issue if that happens.
+Worth stating plainly rather than discovering by surprise.
+
+- **Slash-command invocations may leave a thinner trail.** A skill invoked by
+  the model deciding to call the `Skill` tool always produces the exact
+  signature this tool looks for. Typing a skill's slash command directly
+  (`/critique-plan ...`) is comparatively rare in the data checked so far, and
+  the one clean example available was contaminated by this very tool's own
+  test runs quoting it back into its own transcript. If your workflow leans
+  heavily on typed slash invocations rather than natural-language triggers,
+  spot-check a skill you use that way against your own memory before trusting
+  the count blindly.
+- **Context capture has a size ceiling.** Any `role: user` record over 20KB,
+  or one containing a `tool_result` block, is skipped when looking for the
+  triggering prompt, by design, to avoid the OOM failure mode described
+  above. The practical effect: `--show-context` occasionally reports
+  "(no preceding user message found)" when the real preceding message was a
+  large tool result rather than genuinely missing. The skill invocation
+  itself is still counted correctly either way, only the context line is
+  affected.
+- **Scanning your own live session pollutes raw text-mention counts, not
+  real ones.** If you grep your transcripts for a skill's name while a
+  session discussing that skill is still open, your own command output gets
+  written back into that session's transcript, and the next scan will find
+  its own echo. This inflates naive substring counts (already an unreliable
+  measure on their own, see above) but never affects the `tool_use`-based
+  invocation count, which only matches a precise JSON shape that ordinary
+  prose or command output does not reproduce.
+
+## Contributing
+
+Single file, no build step, no dependencies. Read `cc-skill-usage` top to
+bottom, it is short enough to hold in your head in one sitting. Pull requests
+that add a feature should include the real transcript pattern it relies on
+and a way to verify the count against an independent method, in the same
+spirit as the two checks above.
 
 ## License
 

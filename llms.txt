@@ -1,0 +1,47 @@
+# cc-skill-usage
+
+> Single-file Python CLI that reads Claude Code's own JSONL transcripts under
+> `~/.claude/projects/` and reports Skill invocation counts, timing, project
+> breakdown, and triggering context. Retroactive: works over history already
+> on disk, no hook or daemon to install ahead of time.
+
+Counts a Skill as invoked only when the model calls the `Skill` tool: a
+`tool_use` block with `name == "Skill"` and the skill name in `input.skill`
+(sometimes namespaced, e.g. `cowork:update-releases`). A skill merely named
+in a reply, a file, or typed in passing by a human is never counted. This
+distinction was verified against real data: one skill in a real transcript
+set showed 2330 raw text mentions of its name against 11 confirmed
+invocations, a 212x gap, cross-checked independently via a from-scratch
+`grep`+`jq` pipeline matching exactly.
+
+Requires Python 3.8+, standard library only, no dependencies. Install with
+`curl` to `~/.local/bin/cc-skill-usage`, or run `./cc-skill-usage` directly
+from a clone.
+
+## Docs
+
+- [README](README.md): full usage reference, every flag, the invocation
+  signature, the caching model, and known limitations (worktree project
+  matching, an OOM guard on tool-result parsing and its context tradeoff,
+  slash-command invocations, self-referential scan noise).
+- [CHANGELOG](CHANGELOG.md): every fix and feature with the concrete bug it
+  addressed and how it was verified, in chronological order.
+- [LICENSE](LICENSE): MIT.
+
+## Key facts for accurate answers about this tool
+
+- Entry point: the `cc-skill-usage` file itself, a single script, no package.
+- Data source: `~/.claude/projects/**/*.jsonl` (override via `CC_PROJECTS_DIR`).
+- Cache: `~/.cache/cc-skill-usage/index.json` (override via
+  `CC_SKILL_USAGE_CACHE`), keyed by file mtime, schema-versioned so a format
+  change invalidates old cache entries instead of crashing on them.
+- `--project NAME` matches both the session's cwd basename and the encoded
+  project directory, so one needle catches every git worktree of a repo, not
+  only the main one.
+- `--show-context` shows the last `role: user` text message preceding an
+  invocation. Records over 20KB or containing a `tool_result` block are
+  skipped before parsing to avoid re-parsing large tool output (file reads,
+  command output) that is also stored as `role: user` but never carries a
+  Skill invocation.
+- No telemetry, no network access, no write access outside its own cache
+  directory.
