@@ -1,0 +1,380 @@
+#!/usr/bin/env python3
+"""cc-skill-usage - retroactive Claude Code Skill usage analytics.
+
+Reads the JSONL transcripts under ~/.claude/projects/ and reports how often
+each Skill was actually invoked, when, and in which project. It counts real
+invocations only: a tool_use block whose name == "Skill". A skill merely
+mentioned in prose is not an invocation and is never counted.
+
+Single file, Python 3 standard library only. No external dependencies.
+"""
+
+import argparse
+import json
+import os
+import sys
+import time
+from collections import Counter, defaultdict
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+VERSION = "0.1.0"
+
+PROJECTS_DIR = Path(
+    os.environ.get("CC_PROJECTS_DIR", Path.home() / ".claude" / "projects")
+)
+CACHE_DIR = Path(
+    os.environ.get(
+        "CC_SKILL_USAGE_CACHE",
+        Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+        / "cc-skill-usage",
+    )
+)
+CACHE_FILE = CACHE_DIR / "index.json"
+CACHE_SCHEMA = 1
+
+
+# --------------------------------------------------------------------------
+# Parsing
+# --------------------------------------------------------------------------
+
+def project_from_record(record, jsonl_path):
+    """Best project label: basename of the record cwd, else the encoded dir."""
+    cwd = record.get("cwd")
+    if cwd:
+        base = os.path.basename(cwd.rstrip("/"))
+        if base:
+            return base
+    # Fallback: the first directory segment under projects/ is the encoded cwd.
+    try:
+        rel = jsonl_path.relative_to(PROJECTS_DIR)
+        return rel.parts[0]
+    except ValueError:
+        return jsonl_path.parent.name
+
+
+def is_subagent(jsonl_path):
+    return "subagents" in jsonl_path.parts
+
+
+def parse_file(jsonl_path):
+    """Yield one event dict per real Skill invocation found in a transcript."""
+    subagent = is_subagent(jsonl_path)
+    try:
+        with jsonl_path.open("r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or '"Skill"' not in line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except (ValueError, json.JSONDecodeError):
+                    continue
+                message = record.get("message")
+                if not isinstance(message, dict):
+                    continue
+                content = message.get("content")
+                if not isinstance(content, list):
+                    continue
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") != "tool_use" or block.get("name") != "Skill":
+                        continue
+                    inp = block.get("input") or {}
+                    skill = inp.get("skill")
+                    if not skill:
+                        continue
+                    yield {
+                        "skill": skill,
+                        "args": inp.get("args"),
+                        "ts": record.get("timestamp"),
+                        "project": project_from_record(record, jsonl_path),
+                        "session": jsonl_path.stem,
+                        "subagent": subagent,
+                    }
+    except (OSError, IOError):
+        return
+
+
+# --------------------------------------------------------------------------
+# Cache (mtime-invalidated)
+# --------------------------------------------------------------------------
+
+def load_cache():
+    if not CACHE_FILE.exists():
+        return {}
+    try:
+        with CACHE_FILE.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if data.get("schema") != CACHE_SCHEMA:
+            return {}
+        return data.get("files", {})
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {}
+
+
+def save_cache(files):
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = CACHE_FILE.with_suffix(".tmp")
+        with tmp.open("w", encoding="utf-8") as fh:
+            json.dump({"schema": CACHE_SCHEMA, "files": files}, fh)
+        tmp.replace(CACHE_FILE)
+    except OSError:
+        pass
+
+
+def collect_events(no_cache=False, rebuild=False):
+    """Scan all transcripts, using the mtime cache to skip unchanged files."""
+    if not PROJECTS_DIR.exists():
+        sys.stderr.write(f"No transcripts directory at {PROJECTS_DIR}\n")
+        return []
+
+    cache = {} if (no_cache or rebuild) else load_cache()
+    new_cache = {}
+    events = []
+
+    for path in PROJECTS_DIR.rglob("*.jsonl"):
+        key = str(path)
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        entry = cache.get(key)
+        if entry and entry.get("mtime") == mtime:
+            file_events = entry["events"]
+        else:
+            file_events = list(parse_file(path))
+        new_cache[key] = {"mtime": mtime, "events": file_events}
+        events.extend(file_events)
+
+    if not no_cache:
+        save_cache(new_cache)
+    return events
+
+
+# --------------------------------------------------------------------------
+# Filtering & helpers
+# --------------------------------------------------------------------------
+
+def parse_ts(ts):
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def parse_since(since):
+    """Accept 7d / 24h / 2w or an ISO date YYYY-MM-DD. Returns aware datetime."""
+    now = datetime.now(timezone.utc)
+    s = since.strip().lower()
+    units = {"h": "hours", "d": "days", "w": "weeks"}
+    if s and s[-1] in units and s[:-1].isdigit():
+        return now - timedelta(**{units[s[-1]]: int(s[:-1])})
+    try:
+        d = datetime.fromisoformat(s)
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+        return d
+    except ValueError:
+        sys.stderr.write(f"Bad --since value: {since} (use 7d, 24h, 2w or a date)\n")
+        sys.exit(2)
+
+
+def apply_filters(events, args):
+    out = events
+    if not args.include_subagents:
+        out = [e for e in out if not e["subagent"]]
+    if args.project:
+        needle = args.project.lower()
+        out = [e for e in out if needle in e["project"].lower()]
+    if args.since:
+        floor = parse_since(args.since)
+        kept = []
+        for e in out:
+            dt = parse_ts(e["ts"])
+            if dt is not None and dt >= floor:
+                kept.append(e)
+        out = kept
+    return out
+
+
+def fmt_day(ts):
+    dt = parse_ts(ts)
+    return dt.date().isoformat() if dt else "unknown"
+
+
+# --------------------------------------------------------------------------
+# Views
+# --------------------------------------------------------------------------
+
+def view_leaderboard(events, as_json):
+    counts = Counter(e["skill"] for e in events)
+    projects = defaultdict(set)
+    first = {}
+    last = {}
+    for e in events:
+        projects[e["skill"]].add(e["project"])
+        day = fmt_day(e["ts"])
+        if day != "unknown":
+            if e["skill"] not in first or day < first[e["skill"]]:
+                first[e["skill"]] = day
+            if e["skill"] not in last or day > last[e["skill"]]:
+                last[e["skill"]] = day
+
+    rows = []
+    for skill, n in counts.most_common():
+        rows.append({
+            "skill": skill,
+            "invocations": n,
+            "projects": len(projects[skill]),
+            "first_seen": first.get(skill, "unknown"),
+            "last_seen": last.get(skill, "unknown"),
+        })
+
+    if as_json:
+        print(json.dumps({
+            "total_invocations": sum(counts.values()),
+            "distinct_skills": len(counts),
+            "skills": rows,
+        }, indent=2))
+        return
+
+    if not rows:
+        print("No skill invocations found.")
+        return
+
+    wname = max(len("SKILL"), max(len(r["skill"]) for r in rows))
+    print(f"{'SKILL':<{wname}}  {'INVOC':>5}  {'PROJ':>4}  {'FIRST':>10}  {'LAST':>10}")
+    print(f"{'-' * wname}  {'-'*5}  {'-'*4}  {'-'*10}  {'-'*10}")
+    for r in rows:
+        print(f"{r['skill']:<{wname}}  {r['invocations']:>5}  {r['projects']:>4}  "
+              f"{r['first_seen']:>10}  {r['last_seen']:>10}")
+    print(f"\n{sum(counts.values())} invocations across {len(counts)} skills.")
+
+
+def view_detail(events, skill, as_json):
+    hits = [e for e in events if e["skill"] == skill]
+    by_project = Counter(e["project"] for e in hits)
+    by_day = Counter(fmt_day(e["ts"]) for e in hits)
+    by_args = Counter(e["args"] for e in hits if e["args"])
+    sessions = {e["session"] for e in hits}
+
+    if as_json:
+        print(json.dumps({
+            "skill": skill,
+            "invocations": len(hits),
+            "sessions": len(sessions),
+            "by_project": dict(by_project.most_common()),
+            "by_day": dict(sorted(by_day.items())),
+            "by_args": dict(by_args.most_common()),
+        }, indent=2))
+        return
+
+    if not hits:
+        print(f"No invocations of '{skill}'.")
+        return
+
+    print(f"{skill}: {len(hits)} invocations across {len(sessions)} sessions\n")
+    print("By project:")
+    for proj, n in by_project.most_common():
+        print(f"  {n:>4}  {proj}")
+    if by_args:
+        print("\nBy argument:")
+        for a, n in by_args.most_common():
+            print(f"  {n:>4}  {a}")
+    print("\nBy day:")
+    for day, n in sorted(by_day.items()):
+        bar = "#" * min(n, 40)
+        print(f"  {day}  {n:>3}  {bar}")
+
+
+def view_recent(events, limit, as_json):
+    dated = [(parse_ts(e["ts"]), e) for e in events]
+    dated = [(dt, e) for dt, e in dated if dt is not None]
+    dated.sort(key=lambda x: x[0], reverse=True)
+    picked = [e for _, e in dated[:limit]]
+
+    if as_json:
+        print(json.dumps([{
+            "ts": e["ts"], "skill": e["skill"], "args": e["args"],
+            "project": e["project"], "session": e["session"],
+            "subagent": e["subagent"],
+        } for e in picked], indent=2))
+        return
+
+    if not picked:
+        print("No invocations found.")
+        return
+
+    wname = max(len(e["skill"]) for e in picked)
+    for e in picked:
+        dt = parse_ts(e["ts"])
+        when = dt.strftime("%Y-%m-%d %H:%M") if dt else "unknown"
+        tag = " (subagent)" if e["subagent"] else ""
+        arg = f" [{e['args']}]" if e["args"] else ""
+        print(f"{when}  {e['skill']:<{wname}}{arg}  {e['project']}{tag}")
+
+
+# --------------------------------------------------------------------------
+# CLI
+# --------------------------------------------------------------------------
+
+def build_parser():
+    p = argparse.ArgumentParser(
+        prog="cc-skill-usage",
+        description="Retroactive Claude Code Skill usage analytics "
+                    "(reads ~/.claude/projects transcripts).",
+    )
+    p.add_argument("skill", nargs="?", help="show detail for one skill")
+    p.add_argument("--all", nargs=2, metavar=("MODE", "N"),
+                   help="e.g. --all recent 20 : list the N most recent invocations")
+    p.add_argument("--since", metavar="WINDOW",
+                   help="time filter: 7d, 24h, 2w, or a date YYYY-MM-DD")
+    p.add_argument("--project", metavar="NAME",
+                   help="filter by project (substring match on the cwd basename)")
+    p.add_argument("--include-subagents", action="store_true",
+                   help="also count invocations made inside subagents")
+    p.add_argument("--json", action="store_true", help="machine-readable output")
+    p.add_argument("--no-cache", action="store_true",
+                   help="parse everything fresh, ignore and do not write the cache")
+    p.add_argument("--rebuild", action="store_true",
+                   help="ignore the cache on read but rewrite it")
+    p.add_argument("--version", action="version", version=f"cc-skill-usage {VERSION}")
+    return p
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+
+    t0 = time.time()
+    events = collect_events(no_cache=args.no_cache, rebuild=args.rebuild)
+    events = apply_filters(events, args)
+    elapsed = time.time() - t0
+
+    if args.all:
+        mode, n = args.all
+        if mode != "recent":
+            sys.stderr.write("Only '--all recent N' is supported.\n")
+            return 2
+        try:
+            limit = int(n)
+        except ValueError:
+            sys.stderr.write(f"N must be an integer, got {n!r}.\n")
+            return 2
+        view_recent(events, limit, args.json)
+    elif args.skill:
+        view_detail(events, args.skill, args.json)
+    else:
+        view_leaderboard(events, args.json)
+
+    if not args.json and os.environ.get("CC_SKILL_USAGE_TIMING"):
+        sys.stderr.write(f"\nscanned in {elapsed:.2f}s\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
