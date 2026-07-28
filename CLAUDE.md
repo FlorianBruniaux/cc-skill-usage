@@ -63,6 +63,17 @@ without error.
   skip. Tightened to `"name":"Skill"`, the actual JSON shape of a real
   invocation. Keep pre-filters anchored to real structure, not to a word that
   can appear in prose.
+- **The `"type":"user"` pre-filter is a measured tradeoff, not an oversight.**
+  `parse_file()` classifies a line as a user record on the raw substring
+  `"type":"user"`, before any `json.loads`. In theory an assistant record
+  could carry that substring elsewhere (a thinking block quoting transcript
+  JSON) and get skipped, losing the Skill invocation on that line. Measured
+  on 690345 real transcript lines: zero lines contain both `"name":"Skill"`
+  and a `"type":"user"` substring. The collision rate is 0 on real data, and
+  the failure mode undercounts rather than overcounts. The obvious fix, parse
+  first and check `record.get("type")` after, discards the whole point of the
+  pre-filter and walks straight back into the OOM above. Re-run that
+  measurement before changing it.
 - **`cwd` basename is not a stable project identifier under git worktrees.**
   Each worktree's cwd basename is its own branch name
   (`fix-issue-123`, `feature-x`), never the repo name. `--project` matches
