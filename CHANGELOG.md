@@ -59,6 +59,31 @@ adheres to semantic versioning.
   that data) splits every counter while an inventory count still returns a
   clean number.
 
+  Revised again after a second run, on a documentation corpus shipping an
+  MCP server to npm. Two behaviors the auditor produced on its own, worth
+  making mandatory rather than leaving to luck.
+
+  Phase 0 now records the working tree state. That run measured a repo
+  someone else was editing live: four files changed mid-audit and two
+  findings were fixed under it. It handled that by opening with a timestamped
+  caveat and marking the affected findings, which is the only reason its
+  numbers stayed interpretable. The prompt now requires the `git status`
+  check up front, a re-check of every file a finding rests on before writing
+  the report, and an explicit list of the auditor's own writes. A dirty-tree
+  note goes above everything else in the report, since a reader who does not
+  know the tree moved cannot tell a stale finding from a live one.
+
+  Phase 2 now requires running the checker the repo already ships before
+  building your own. That run's strongest finding, an index of line
+  references stale enough that the published npm package returned unrelated
+  prose for a documented lookup, was settled because the auditor's own
+  matching and the repo's `resync-reference-yaml.py` derived the same
+  corrected line number from different angles, the repo's script reporting 89
+  of 472 references still valid. Agreement across two independent methods is
+  the same discipline this tool applies to its own counts. Disagreement is
+  called out as equally informative, and a shipped checker that cannot fail
+  or was never wired into CI is named as a finding in its own right.
+
 ### Fixed
 - `llms.txt` and the repository layout in `CLAUDE.md` both still listed only
   the four original files. `EXAMPLES.md`, `prompts/`, and the bundled

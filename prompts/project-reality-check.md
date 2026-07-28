@@ -32,6 +32,18 @@ State that command explicitly before continuing. If you cannot find one,
 that is itself the first finding: the project has no way to demonstrate
 itself, and everything below becomes unverifiable.
 
+Then record the state of the working tree, because it decides what your
+measurements mean. Run `git status --short` and note the current HEAD. If
+anything is uncommitted, say what and stop treating the tree as the
+published state: you are auditing someone's work in progress, and a wrong
+number you find may already be fixed on their disk.
+
+Someone may keep editing while you measure. Note the modification time of
+every file you draw a finding from, and re-check it before you write the
+report. Any finding whose file changed under you gets marked as such, with
+the timestamp, rather than silently dropped or silently kept. State your own
+writes explicitly too, so nobody has to guess which changes were yours.
+
 ## Phase 1 - Run it and capture real output
 
 Execute the command. Capture what it actually prints, including errors,
@@ -81,6 +93,28 @@ Pay particular attention to counts that were true when written and drift
 silently afterward: number of tests, number of templates, number of tools,
 number of supported providers. Count them yourself with a command, do not
 trust the number in the prose.
+
+### Run the checker the repo already ships
+
+Before building your own measurement, look for a script in the repo that
+already checks the thing you are about to check: a `sync`, `resync`,
+`verify`, `validate`, `check`, `doctor`, or `--check` mode. Run it in its
+read-only form and compare its output to yours.
+
+Agreement between your method and one written by someone else, from a
+different angle, turns a finding from an argument into a fact. On a real
+run this is what settled the strongest finding of an audit: an index of
+line references was measured stale independently by the auditor and by the
+repo's own resync script, both deriving the same corrected line number, with
+the repo's script reporting 89 of 472 references still valid.
+
+Disagreement is worth as much. If the repo's own checker says a thing is
+fine and your measurement says otherwise, one of you is wrong about the
+project, and finding out which is more valuable than either verdict alone.
+
+A shipped checker that has never been run, or that cannot fail, is itself a
+finding. Check whether it is wired into CI, and whether it can actually
+return non-zero.
 
 ## Phase 3 - Index sync
 
@@ -174,7 +208,13 @@ Produce, in this order:
    cosmetic inconsistencies are usually correct to leave. Say so rather
    than silently skipping them.
 4. **What you could not verify**, and what would be needed to verify it.
+   Include anything the working-tree state made unmeasurable.
 5. **Appendix: the claims table** from phase 2.
+
+If the tree was dirty or changed during the audit, that goes at the very
+top, before point 1, in three lines: what was uncommitted, what changed
+while you worked and when, and what you wrote yourself. A reader who does
+not know the tree moved cannot tell a stale finding from a live one.
 
 ### Merge findings that share one root cause
 
@@ -200,6 +240,10 @@ that it drifts and move on.
 
 One root cause is one finding, however many places it shows up. Count the
 fixes needed, not the symptoms observed.
+
+Prefer a second independent method over a second look at your own. Running
+the repo's own checker, or a from-scratch pipeline built differently, beats
+re-reading your first measurement.
 
 If a claim in the docs turns out correct, say so explicitly. A report that
 only lists problems hides the fact that most of the project holds up, and
