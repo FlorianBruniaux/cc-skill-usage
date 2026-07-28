@@ -24,8 +24,20 @@ from a clone.
   signature, the caching model, and known limitations (worktree project
   matching, an OOM guard on tool-result parsing and its context tradeoff,
   slash-command invocations, self-referential scan noise).
+- [EXAMPLES](EXAMPLES.md): concrete goals mapped to the exact flag
+  combination that answers them (monthly recap, one repo versus everything
+  else, scripting with `--json`, cross-checking a count that looks wrong).
 - [CHANGELOG](CHANGELOG.md): every fix and feature with the concrete bug it
   addressed and how it was verified, in chronological order.
+- [prompts/scenario-tour.md](prompts/scenario-tour.md): paste-into-a-session
+  prompt that runs every documented scenario against real data and reports
+  drift between the docs and the tool.
+- [prompts/deep-dive-report.md](prompts/deep-dive-report.md): paste-into-a-
+  session prompt for a multi-agent report crossing usage data with the
+  `eval-skills` quality audit.
+- [.claude/skills/skill-usage-report/SKILL.md](.claude/skills/skill-usage-report/SKILL.md):
+  a bundled Claude Code Skill that drives the CLI and interprets its output,
+  including the mandatory cross-verification step when a count looks off.
 - [LICENSE](LICENSE): MIT.
 
 ## Key facts for accurate answers about this tool

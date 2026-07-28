@@ -18,6 +18,24 @@ adheres to semantic versioning.
   quality audit, producing quadrant tables (high/low usage x high/low
   quality) and impact-ranked, verified fixes.
 
+### Fixed
+- `llms.txt` and the repository layout in `CLAUDE.md` both still listed only
+  the four original files. `EXAMPLES.md`, `prompts/`, and the bundled
+  `skill-usage-report` Skill had shipped without being added to either index.
+  `llms.txt` exists specifically to be a complete index for an LLM reading
+  the repo, so missing two documents was a defect in the file's only job.
+  Both updated, and `CLAUDE.md` now states the three-index rule so the next
+  doc addition does not drift the same way.
+- README claimed warm runs finish "well under a tenth of a second". Measured
+  on the machine the claim came from, the real figure is about 0.18s across
+  roughly 2000 sessions, since a warm run still stats every transcript to
+  check its mtime. Corrected to ~0.2s with the reason stated.
+- `.gitignore` covered neither `.idea/` (JetBrains project files) nor
+  `reports/`, the output directory `prompts/deep-dive-report.md` writes into.
+  A generated report carries the real project and skill names of whoever ran
+  it, so committing one publishes someone's private workflow inventory.
+  Both ignored.
+
 ## [0.2.3] - 2026-07-26
 
 ### Added

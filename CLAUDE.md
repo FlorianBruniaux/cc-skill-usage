@@ -13,10 +13,18 @@ installed ahead of time.
 ```
 cc-skill-usage    # the entire tool, one file, no package, no build step
 README.md         # usage reference for humans
+EXAMPLES.md       # goal-oriented scenarios mapped to the command that answers them
 CHANGELOG.md      # every fix/feature with the bug it addressed and the verification
 llms.txt          # compact index for LLM consumption (llmstxt.org format)
+prompts/          # paste-into-a-session prompts: scenario smoke test, deep-dive report
+.claude/skills/   # skill-usage-report, a Skill that drives and interprets the CLI
 LICENSE           # MIT
 ```
+
+Adding a doc file means updating three indexes, not one: the README link
+list, `llms.txt` (its whole job is being the complete index), and the layout
+block above. All three drifted once already when `EXAMPLES.md` and
+`prompts/` landed.
 
 There is no `src/`, no test suite directory, no CI config. Keep it that way
 unless a real need forces otherwise: the entire value of this tool is that it

@@ -164,8 +164,9 @@ about 70MB.
 Results are cached in `~/.cache/cc-skill-usage/index.json`, keyed by file
 mtime. The first run parses everything (a few seconds across roughly 2000
 sessions on the machine this was built on), later runs reuse the cache and
-finish in well under a tenth of a second. Only changed transcripts get
-re-parsed. The cache carries a schema version, so an update that changes what
+land around 0.2s on that same set. Only changed transcripts get re-parsed,
+so the warm number tracks how many sessions you have, not how much history
+is in them. The cache carries a schema version, so an update that changes what
 gets stored per event invalidates old cache entries automatically instead of
 crashing on a missing field.
 
