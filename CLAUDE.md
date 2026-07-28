@@ -16,7 +16,9 @@ README.md         # usage reference for humans
 EXAMPLES.md       # goal-oriented scenarios mapped to the command that answers them
 CHANGELOG.md      # every fix/feature with the bug it addressed and the verification
 llms.txt          # compact index for LLM consumption (llmstxt.org format)
-prompts/          # paste-into-a-session prompts: scenario smoke test, deep-dive report
+prompts/          # paste-into-a-session prompts. Two are about this tool (scenario
+                  # smoke test, deep-dive report); project-reality-check.md is
+                  # project-agnostic and works on any repo in any language
 .claude/skills/   # skill-usage-report, a Skill that drives and interprets the CLI
 LICENSE           # MIT
 ```

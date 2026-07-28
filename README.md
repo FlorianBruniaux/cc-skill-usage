@@ -81,12 +81,20 @@ See [EXAMPLES.md](EXAMPLES.md) for concrete scenarios (a monthly recap, one
 repo versus everything else, scripting with `--json`, cross-checking a
 count that looks wrong) matched to the exact command that answers them.
 
-Two ready-to-paste prompts for a fresh Claude Code session live in
-[prompts/](prompts/): [`scenario-tour.md`](prompts/scenario-tour.md) smoke-
-tests every scenario in EXAMPLES.md against real data, and
+Ready-to-paste prompts for a fresh Claude Code session live in
+[prompts/](prompts/). Two of them are about this tool:
+[`scenario-tour.md`](prompts/scenario-tour.md) smoke-tests every scenario in
+EXAMPLES.md against real data, and
 [`deep-dive-report.md`](prompts/deep-dive-report.md) runs a multi-agent
 audit crossing usage data with the `eval-skills` quality audit, producing a
 report with quadrant tables and impact-ranked fixes.
+
+The third, [`project-reality-check.md`](prompts/project-reality-check.md),
+is project-agnostic: paste it at the root of any repo, in any language, and
+it audits that repo by running it rather than reading it, then checks every
+falsifiable claim in its docs against a measured number. It lives here
+because this repo is where it was written, not because it needs
+`cc-skill-usage` to work.
 
 ### Filtering by project, including worktrees
 

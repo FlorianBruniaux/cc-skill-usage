@@ -35,6 +35,11 @@ from a clone.
 - [prompts/deep-dive-report.md](prompts/deep-dive-report.md): paste-into-a-
   session prompt for a multi-agent report crossing usage data with the
   `eval-skills` quality audit.
+- [prompts/project-reality-check.md](prompts/project-reality-check.md): a
+  project-agnostic audit prompt, unrelated to `cc-skill-usage` itself. Paste
+  it at the root of any repo in any language to audit that repo by running
+  it, test every falsifiable doc claim against a measured number, check
+  index sync, and surface what the project cannot answer about itself.
 - [.claude/skills/skill-usage-report/SKILL.md](.claude/skills/skill-usage-report/SKILL.md):
   a bundled Claude Code Skill that drives the CLI and interprets its output,
   including the mandatory cross-verification step when a count looks off.

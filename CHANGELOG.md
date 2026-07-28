@@ -17,6 +17,16 @@ adheres to semantic versioning.
   session that crosses `cc-skill-usage` usage data with the `eval-skills`
   quality audit, producing quadrant tables (high/low usage x high/low
   quality) and impact-ranked, verified fixes.
+- `prompts/project-reality-check.md`: a project-agnostic audit prompt, the
+  only file here that has nothing to do with `cc-skill-usage`. Paste it at
+  the root of any repo, in any language, and it audits that repo by running
+  it rather than reading it: extract every falsifiable claim from the docs
+  and measure it, check that every file is reachable from every index, look
+  for leaked personal data in tracked files, and probe what the project
+  cannot answer about itself (empty input, malformed input, largest real
+  input). Written while auditing this repo, where it caught a wrong perf
+  figure, two stale indexes, and an ignorable-looking directory holding real
+  project names.
 
 ### Fixed
 - `llms.txt` and the repository layout in `CLAUDE.md` both still listed only
