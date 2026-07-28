@@ -17,7 +17,7 @@ from reading the source and reasoning about it is a hypothesis. A finding
 backed by a command you ran and its output is a fact. Report facts, and
 label hypotheses as hypotheses.
 
-Work through the six phases below in order. Do not skip a phase because it
+Work through phases 0 to 7 below in order. Do not skip a phase because it
 "looks fine" from a file listing.
 
 ## Phase 0 - What is this thing, and what does running it mean
@@ -58,10 +58,20 @@ Examples of falsifiable claims: "runs in under 200ms", "zero dependencies",
 Examples of claims to skip: "fast", "developer-friendly", "powerful". They
 cannot be tested, and arguing about them wastes the pass.
 
-For each falsifiable claim, run the check and put it in a table:
+For each falsifiable claim, run the check. Collect the results in a table
+with exactly these three columns, kept short enough to survive an 80-column
+terminal:
 
-| Claim | Where it appears | Measured | Verdict |
-|---|---|---|---|
+| Claim | Measured | Verdict |
+|---|---|---|
+
+The file and line where the claim appears belongs in the finding that cites
+it, not in this table. A fourth column of long paths wraps and shreds the
+whole table.
+
+This table goes in an appendix at the end of the report, not before the
+findings. On a large repo it runs to thirty rows and buries the one thing
+the reader needed to see.
 
 Verdict is one of: confirmed, wrong, unverifiable-here (say why). A claim
 that is off by a factor you would notice is a finding. A claim off in the
@@ -85,7 +95,34 @@ listed in an index and absent from the repo. Broken internal links count.
 This is where recently-added files hide. Something shipped two commits ago
 is exactly what nobody added to the index.
 
-## Phase 4 - Leak and hygiene check
+## Phase 4 - Inventory versus actual use
+
+When a repo declares a fleet of anything (skills, agents, plugins,
+templates, rules, hooks, MCP tools, npm scripts, feature flags, cron jobs),
+counting it is the easy half and phase 2 already did it. The question that
+decides whether the fleet is an asset or a tax is what share of it ever
+runs.
+
+For each fleet, ask how many members have actually fired, and where that
+would be recorded. Usually not in the repo: execution history lives in
+transcripts, logs, analytics, CI run history, or a registry's download
+stats. If you can reach that source, measure the ratio and report it. If
+you cannot, say so and name the source that would answer it. Never
+substitute the inventory count for the usage count and move on, because a
+fleet of 139 with a drift of 2 is a trivial problem while a fleet of 139
+where 17 ever fire is the most expensive thing in the repo.
+
+For a Claude Code repo specifically, Skill invocations are recorded in the
+transcripts under `~/.claude/projects/`, not in the repo:
+`cc-skill-usage --project <repo-name> --include-subagents`.
+
+Then look for the same entity declared under two names. A half-finished
+rename (`tech-pr-feedback` and `tech:pr-feedback`, `TDD` and `tdd`) leaves
+both spellings alive and splits every counter between them. An inventory
+count returns a clean number that hides it completely, so this only shows up
+when you list usage by exact name.
+
+## Phase 5 - Leak and hygiene check
 
 Run `git status --short` and `git ls-files`. For each untracked path, decide
 explicitly: should it be committed, ignored, or deleted. Never leave it
@@ -101,7 +138,7 @@ If the project generates output into a directory, check whether that
 directory is ignored. Generated output usually carries the real names of
 whoever ran it.
 
-## Phase 5 - What the project cannot answer about itself
+## Phase 6 - What the project cannot answer about itself
 
 This is the phase that finds the gaps, so do not rush it.
 
@@ -121,22 +158,34 @@ the changes a future contributor makes confidently and regrets. If you find
 one, measure how often the current approach actually fails before writing it
 down, and put the measurement in the note.
 
-## Phase 6 - Report
+## Phase 7 - Report
 
 Produce, in this order:
 
 1. **What this project does**, in three sentences, written from what you
    observed running it, not from the README's own pitch.
-2. **The claims table** from phase 2.
-3. **Findings, ranked by whether they mislead a user.** A wrong number in
-   the README outranks a missing index entry, which outranks a style nit.
-   Every finding names a file and a line or a command, and carries a
-   measured number. A finding without one of those does not go in the list.
-4. **What you fixed, and what you deliberately left alone with the reason.**
+2. **Findings, ranked by whether they mislead a user.** A CI gate that
+   cannot fail outranks a wrong version number, which outranks a missing
+   index entry, which outranks a style nit. Every finding names a file and a
+   line or a command, and carries a measured number. A finding without one
+   of those does not go in the list.
+3. **What you fixed, and what you deliberately left alone with the reason.**
    Illustrative examples that drift, historical changelog entries, and
    cosmetic inconsistencies are usually correct to leave. Say so rather
    than silently skipping them.
-5. **What you could not verify**, and what would be needed to verify it.
+4. **What you could not verify**, and what would be needed to verify it.
+5. **Appendix: the claims table** from phase 2.
+
+### Merge findings that share one root cause
+
+Before ranking, group the findings by what actually has to change to fix
+them. Five wrong counts in a README are not five findings, they are one:
+the README hardcodes counts that drift. Report the root cause as a single
+entry and list the instances under it.
+
+Splitting one cause into five entries inflates the count and pushes the
+finding that matters down the page. If the top item on your list is a stale
+number while a CI gate silently passes on every run, the ranking failed.
 
 ## Rules
 
@@ -148,6 +197,9 @@ about the repo, not a discovery.
 
 Do not fix illustrative example output whose numbers drift with time. Say
 that it drifts and move on.
+
+One root cause is one finding, however many places it shows up. Count the
+fixes needed, not the symptoms observed.
 
 If a claim in the docs turns out correct, say so explicitly. A report that
 only lists problems hides the fact that most of the project holds up, and

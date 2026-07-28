@@ -28,6 +28,37 @@ adheres to semantic versioning.
   figure, two stale indexes, and an ignorable-looking directory holding real
   project names.
 
+### Changed
+- `prompts/project-reality-check.md` revised after its first run on an
+  outside repo (a Next.js monolith with 1213 test files and a 139-skill
+  fleet). Three defects showed up in the report it produced, all fixed in
+  the prompt rather than worked around by hand.
+
+  The claims table came before the findings and ran to 35 rows, burying the
+  single finding that mattered (a CI gate that could not fail, since a
+  `require()` in an ESM package threw, got caught, and exited 0 with a green
+  check). The table now goes in an appendix, and drops from four columns to
+  three: the file and line move into the finding that cites them, since a
+  column of long paths wraps and shreds the table on an 80-column terminal.
+  That is the same failure the `--show-context` leaderboard hit in 0.2.2.
+
+  Twelve findings were reported where six root causes existed: five separate
+  entries for wrong counts in a README are one entry, "the README hardcodes
+  counts that drift". A merge rule now runs before ranking, and the rules
+  section states it as "one root cause is one finding, however many places
+  it shows up".
+
+  A new phase 4 separates inventory from actual use. The report counted a
+  139-skill fleet and flagged that the number had drifted by 2, never asking
+  how many of the 139 ever fire. Measured with this tool on the same repo:
+  102 invocations across 41 distinct skills, of which 17 look project-local.
+  A fleet of 139 with a drift of 2 is trivial; a fleet of 139 where 17 fire
+  is the most expensive thing in the repo. The phase also asks for the same
+  entity declared under two names, since a half-finished rename
+  (`tech-pr-feedback` and `tech:pr-feedback`, `TDD` and `tdd`, both found in
+  that data) splits every counter while an inventory count still returns a
+  clean number.
+
 ### Fixed
 - `llms.txt` and the repository layout in `CLAUDE.md` both still listed only
   the four original files. `EXAMPLES.md`, `prompts/`, and the bundled
