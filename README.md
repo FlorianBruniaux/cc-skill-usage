@@ -241,6 +241,19 @@ that add a feature should include the real transcript pattern it relies on
 and a way to verify the count against an independent method, in the same
 spirit as the two checks above.
 
+<!-- BEGIN GENERATED RELATED PROJECTS -->
+<!-- Source: https://github.com/FlorianBruniaux/FlorianBruniaux/blob/main/ecosystem/projects.json; project: cc-skill-usage -->
+## Explore the ecosystem
+
+These projects extend the workflow without duplicating this tool:
+
+- **Search with [CC-Sessions](https://github.com/FlorianBruniaux/cc-sessions)**: explore the sessions that contain the measured invocations.
+- **Visualize with [CCBoard](https://github.com/FlorianBruniaux/ccboard)**: pair specialist CLI analysis with a broader session dashboard.
+- **Validate with [flow-lean](https://github.com/FlorianBruniaux/flow-lean)**: verify empirically that the advertised skill is actually invoked.
+
+[Browse the complete open-source galaxy](https://github.com/FlorianBruniaux#open-source-galaxy)
+<!-- END GENERATED RELATED PROJECTS -->
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
