@@ -10,6 +10,20 @@ adheres to semantic versioning.
 ## [Unreleased]
 
 ### Added
+- Codex skill loading through `load --skill NAME --path PATH`, with local
+  instrumented events kept separate from native Claude invocations and
+  optional inferred Codex reads. Reports support `--host claude|codex|all`.
+
+### Fixed
+- The loader accepts project skills from the current Git checkout, including
+  linked worktrees, and installed plugin caches. It still rejects sibling
+  repositories and symlinks escaping the checkout; `CC_SKILL_ROOTS` remains
+  an exclusive override. Sixteen isolated tests cover loading and evidence
+  boundaries, including eight project-root regressions. Valid JSON lines that are not
+  objects are skipped instead of crashing the instrumented-event reader.
+
+
+### Added
 - `prompts/scenario-tour.md`: a ready-to-paste prompt that smoke-tests every
   scenario in `EXAMPLES.md` against real data and flags any drift between
   documented and actual behavior.

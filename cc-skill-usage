@@ -1,25 +1,27 @@
 #!/usr/bin/env python3
-"""cc-skill-usage - retroactive Claude Code Skill usage analytics.
+"""cc-skill-usage - cross-client Skill usage analytics.
 
-Reads the JSONL transcripts under ~/.claude/projects/ and reports how often
-each Skill was actually invoked, when, and in which project. It counts real
-invocations only: a tool_use block whose name == "Skill". A skill merely
-mentioned in prose is not an invocation and is never counted.
+Reads Claude Code transcripts, Codex instrumented events, and optional Codex
+observed loads. Exact and inferred evidence are never merged silently.
 
 Single file, Python 3 standard library only. No external dependencies.
 """
 
 import argparse
+import hashlib
 import json
 import os
+import re
 import shutil
+import subprocess
 import sys
 import time
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
-VERSION = "0.2.3"
+VERSION = "0.3.0"
 
 PROJECTS_DIR = Path(
     os.environ.get("CC_PROJECTS_DIR", Path.home() / ".claude" / "projects")
@@ -32,7 +34,148 @@ CACHE_DIR = Path(
     )
 )
 CACHE_FILE = CACHE_DIR / "index.json"
-CACHE_SCHEMA = 2
+CACHE_SCHEMA = 3
+CODEX_SESSIONS_DIR = Path(
+    os.environ.get("CODEX_SESSIONS_DIR", Path.home() / ".codex" / "sessions")
+)
+EVENT_LOG = Path(
+    os.environ.get(
+        "CC_SKILL_USAGE_EVENT_LOG",
+        Path.home() / ".local" / "state" / "ai-agents" / "skill-usage" / "events.jsonl",
+    )
+)
+EXACT_EVIDENCE = {"native_invocation", "instrumented_invocation"}
+SKILL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+
+
+def project_skill_roots():
+    """Use the current Git checkout, including linked worktrees, not its siblings."""
+    cwd = Path.cwd().resolve()
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(cwd), "rev-parse", "--show-toplevel"],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            timeout=5, check=False,
+        )
+        project = Path(result.stdout.strip()).resolve(strict=True) if result.returncode == 0 else cwd
+    except (OSError, subprocess.TimeoutExpired):
+        project = cwd
+    if not cwd.is_relative_to(project):
+        return []
+    # Nested skill roots follow the working directory's ancestors up to this
+    # checkout. A root symlink must not widen access outside the checkout.
+    roots = []
+    for directory in (cwd, *cwd.parents):
+        if not directory.is_relative_to(project):
+            break
+        for client in (".agents", ".claude", ".codex"):
+            candidate = directory / client / "skills"
+            try:
+                resolved = candidate.resolve(strict=True)
+                if resolved.is_dir() and resolved.is_relative_to(project):
+                    roots.append(resolved)
+            except OSError:
+                continue
+    return roots
+
+
+def skill_roots():
+    """Return resolved skill roots; explicit overrides remain exclusive."""
+    configured = os.environ.get("CC_SKILL_ROOTS")
+    if configured:
+        candidates = [Path(item) for item in configured.split(os.pathsep) if item]
+    else:
+        candidates = [
+            Path.home() / ".claude" / "skills",
+            Path.home() / ".codex" / "skills",
+            Path.home() / ".agents" / "skills",
+            Path.home() / ".config" / "ai-agents" / "current" / "skills",
+            Path.home() / ".claude" / "plugins" / "cache",
+            Path.home() / ".codex" / "plugins" / "cache",
+            *project_skill_roots(),
+        ]
+    roots = []
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve(strict=True)
+            if resolved.is_dir() and resolved not in roots:
+                roots.append(resolved)
+        except OSError:
+            continue
+    return roots
+
+
+def parse_declared_name(content):
+    """Read only the top YAML frontmatter name without requiring PyYAML."""
+    lines = content.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        match = re.match(r"^name:\s*[\"']?([^\"'#]+?)[\"']?\s*$", line)
+        if match:
+            return match.group(1).strip()
+    return None
+
+
+def validated_skill(path, requested_name=None):
+    if path.name != "SKILL.md":
+        raise ValueError("target must be a SKILL.md file")
+    resolved = path.resolve(strict=True)
+    if not resolved.is_file():
+        raise ValueError("target must be a regular file")
+    if not any(resolved.is_relative_to(root) for root in skill_roots()):
+        raise ValueError("target is outside allowed skill roots")
+    content = resolved.read_text(encoding="utf-8")
+    declared = parse_declared_name(content)
+    if not declared or not SKILL_NAME.fullmatch(declared):
+        raise ValueError("SKILL.md has no valid frontmatter name")
+    if requested_name:
+        if not SKILL_NAME.fullmatch(requested_name):
+            raise ValueError("invalid requested skill name")
+        if requested_name != declared and requested_name.rsplit(":", 1)[-1] != declared:
+            raise ValueError("requested skill name does not match frontmatter")
+    return resolved, declared, content
+
+
+def append_event(event):
+    EVENT_LOG.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    payload = (json.dumps(event, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    if len(payload) > 4096:
+        raise ValueError("event exceeds append safety bound")
+    fd = os.open(EVENT_LOG, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+    try:
+        os.write(fd, payload)
+    finally:
+        os.close(fd)
+    os.chmod(EVENT_LOG, 0o600)
+
+
+def load_skill_command(args):
+    """Print a skill unchanged and log only after a complete validated read."""
+    resolved, declared, content = validated_skill(Path(args.path), args.skill)
+    session_id = (
+        args.session_id
+        or os.environ.get("CODEX_THREAD_ID")
+        or os.environ.get("CODEX_SESSION_ID")
+        or "unknown"
+    )
+    event = {
+        "schema": 1,
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "host": "codex",
+        "session_id": session_id,
+        "skill": args.skill,
+        "declared_name": declared,
+        "evidence": "instrumented_invocation",
+        "source_path_hash": "sha256:" + hashlib.sha256(str(resolved).encode()).hexdigest(),
+        "project": Path.cwd().name,
+        "subagent": bool(args.subagent),
+    }
+    append_event(event)
+    sys.stdout.write(content)
+    return 0
 
 
 # --------------------------------------------------------------------------
@@ -149,6 +292,8 @@ def parse_file(jsonl_path):
                         "skill": skill,
                         "args": inp.get("args"),
                         "ts": record.get("timestamp"),
+                        "host": "claude",
+                        "evidence": "native_invocation",
                         "project": project_from_record(record, jsonl_path),
                         "repo_hint": repo_hint,
                         "session": jsonl_path.stem,
@@ -157,6 +302,153 @@ def parse_file(jsonl_path):
                     }
     except (OSError, IOError):
         return
+
+
+def normalized_cwd(value):
+    if not value:
+        return None
+    if value.startswith("file://"):
+        parsed = urlparse(value)
+        return Path(unquote(parsed.path))
+    return Path(value)
+
+
+def read_instrumented_events():
+    """Read exact forward Codex events, skipping malformed or foreign lines."""
+    events = []
+    malformed = 0
+    if not EVENT_LOG.exists():
+        return events, malformed
+    try:
+        with EVENT_LOG.open("r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if not line.endswith("\n"):
+                    malformed += 1
+                    continue
+                try:
+                    record = json.loads(line)
+                except (ValueError, json.JSONDecodeError):
+                    malformed += 1
+                    continue
+                if (
+                    not isinstance(record, dict)
+                    or record.get("schema") != 1
+                    or record.get("host") != "codex"
+                    or record.get("evidence") != "instrumented_invocation"
+                    or not SKILL_NAME.fullmatch(str(record.get("skill", "")))
+                ):
+                    malformed += 1
+                    continue
+                project = str(record.get("project") or "unknown")
+                events.append({
+                    "skill": record["skill"],
+                    "args": None,
+                    "ts": record.get("timestamp"),
+                    "host": "codex",
+                    "evidence": "instrumented_invocation",
+                    "project": project,
+                    "repo_hint": project,
+                    "session": str(record.get("session_id") or "unknown"),
+                    "subagent": bool(record.get("subagent")),
+                    "context": None,
+                })
+    except OSError:
+        malformed += 1
+    return events, malformed
+
+
+def observed_skill_name(path):
+    try:
+        _, declared, _ = validated_skill(path)
+        return declared
+    except (OSError, UnicodeError, ValueError):
+        return path.parent.name if SKILL_NAME.fullmatch(path.parent.name) else None
+
+
+def parse_codex_file(jsonl_path):
+    """Yield inferred SKILL.md reads from completed Codex command items."""
+    session_id = jsonl_path.stem
+    session_subagent = False
+    seen = set()
+    try:
+        with jsonl_path.open("r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if len(line) > 1000000:
+                    continue
+                if '"type":"session_meta"' in line or '"type": "session_meta"' in line:
+                    try:
+                        record = json.loads(line)
+                    except (ValueError, json.JSONDecodeError):
+                        continue
+                    payload = record.get("payload") or {}
+                    session_id = str(payload.get("id") or payload.get("session_id") or session_id)
+                    source = json.dumps(payload.get("source") or payload.get("thread_source") or "")
+                    session_subagent = "subagent" in source.lower() or "thread_spawn" in source.lower()
+                    continue
+                if "CommandExecution" not in line or "SKILL.md" not in line or "item_completed" not in line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except (ValueError, json.JSONDecodeError):
+                    continue
+                payload = record.get("payload") or {}
+                item = payload.get("item") or {}
+                if (
+                    payload.get("type") != "item_completed"
+                    or item.get("type") != "CommandExecution"
+                    or item.get("status") != "completed"
+                    or item.get("exit_code") != 0
+                ):
+                    continue
+                cwd = normalized_cwd(item.get("cwd"))
+                if cwd is None:
+                    continue
+                for command in item.get("parsed_cmd") or []:
+                    if not isinstance(command, dict) or command.get("type") != "read":
+                        continue
+                    raw_path = command.get("path")
+                    if not raw_path or Path(raw_path).name != "SKILL.md":
+                        continue
+                    candidate = Path(raw_path)
+                    if not candidate.is_absolute():
+                        candidate = cwd / candidate
+                    try:
+                        resolved = candidate.resolve(strict=True)
+                    except OSError:
+                        continue
+                    if not any(resolved.is_relative_to(root) for root in skill_roots()):
+                        continue
+                    key = (session_id, payload.get("turn_id"), str(resolved))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    skill = observed_skill_name(resolved)
+                    if not skill:
+                        continue
+                    project = cwd.name or "unknown"
+                    yield {
+                        "skill": skill,
+                        "args": None,
+                        "ts": record.get("timestamp"),
+                        "host": "codex",
+                        "evidence": "observed_load",
+                        "project": project,
+                        "repo_hint": str(cwd),
+                        "session": session_id,
+                        "subagent": session_subagent,
+                        "context": None,
+                    }
+    except OSError:
+        return
+
+
+def collect_codex_observed():
+    if not CODEX_SESSIONS_DIR.exists():
+        return []
+    events = []
+    for path in CODEX_SESSIONS_DIR.rglob("*.jsonl"):
+        events.extend(parse_codex_file(path))
+    return events
 
 
 # --------------------------------------------------------------------------
@@ -187,7 +479,7 @@ def save_cache(files):
         pass
 
 
-def collect_events(no_cache=False, rebuild=False):
+def collect_claude_events(no_cache=False, rebuild=False):
     """Scan all transcripts, using the mtime cache to skip unchanged files."""
     if not PROJECTS_DIR.exists():
         sys.stderr.write(f"No transcripts directory at {PROJECTS_DIR}\n")
@@ -214,6 +506,20 @@ def collect_events(no_cache=False, rebuild=False):
     if not no_cache:
         save_cache(new_cache)
     return events
+
+
+def collect_events(host="all", include_inferred_codex=False, no_cache=False, rebuild=False):
+    events = []
+    diagnostics = {"malformed_event_lines": 0}
+    if host in {"claude", "all"}:
+        events.extend(collect_claude_events(no_cache=no_cache, rebuild=rebuild))
+    if host in {"codex", "all"}:
+        instrumented, malformed = read_instrumented_events()
+        events.extend(instrumented)
+        diagnostics["malformed_event_lines"] = malformed
+        if include_inferred_codex:
+            events.extend(collect_codex_observed())
+    return events, diagnostics
 
 
 # --------------------------------------------------------------------------
@@ -277,37 +583,43 @@ def fmt_day(ts):
 # --------------------------------------------------------------------------
 
 def view_leaderboard(events, as_json, show_context=False):
-    counts = Counter(e["skill"] for e in events)
+    counts = Counter((e["host"], e["skill"], e["evidence"]) for e in events)
     projects = defaultdict(set)
     first = {}
     last = {}
     most_recent = {}  # skill -> (dt, event), for the last-context column
 
     for e in events:
-        projects[e["skill"]].add(e["project"])
+        key = (e["host"], e["skill"], e["evidence"])
+        projects[key].add(e["project"])
         day = fmt_day(e["ts"])
         if day != "unknown":
-            if e["skill"] not in first or day < first[e["skill"]]:
-                first[e["skill"]] = day
-            if e["skill"] not in last or day > last[e["skill"]]:
-                last[e["skill"]] = day
+            if key not in first or day < first[key]:
+                first[key] = day
+            if key not in last or day > last[key]:
+                last[key] = day
         dt = parse_ts(e["ts"])
         if dt is not None:
-            prev = most_recent.get(e["skill"])
+            prev = most_recent.get(key)
             if prev is None or dt > prev[0]:
-                most_recent[e["skill"]] = (dt, e)
+                most_recent[key] = (dt, e)
 
     rows = []
-    for skill, n in counts.most_common():
+    for (host, skill, evidence), n in counts.most_common():
+        key = (host, skill, evidence)
         row = {
+            "host": host,
             "skill": skill,
-            "invocations": n,
-            "projects": len(projects[skill]),
-            "first_seen": first.get(skill, "unknown"),
-            "last_seen": last.get(skill, "unknown"),
+            "evidence": evidence,
+            "events": n,
+            "invocations": n if evidence in EXACT_EVIDENCE else 0,
+            "observed_loads": n if evidence == "observed_load" else 0,
+            "projects": len(projects[key]),
+            "first_seen": first.get(key, "unknown"),
+            "last_seen": last.get(key, "unknown"),
         }
         if show_context:
-            recent = most_recent.get(skill)
+            recent = most_recent.get(key)
             if recent:
                 _, e = recent
                 row["last_context"] = e["context"]
@@ -321,23 +633,28 @@ def view_leaderboard(events, as_json, show_context=False):
 
     if as_json:
         print(json.dumps({
-            "total_invocations": sum(counts.values()),
-            "distinct_skills": len(counts),
+            "total_invocations": sum(
+                n for (_, _, evidence), n in counts.items() if evidence in EXACT_EVIDENCE
+            ),
+            "total_observed_loads": sum(
+                n for (_, _, evidence), n in counts.items() if evidence == "observed_load"
+            ),
+            "distinct_skills": len({e["skill"] for e in events}),
             "skills": rows,
         }, indent=2))
         return
 
     if not rows:
-        print("No skill invocations found.")
+        print("No skill usage evidence found.")
         return
 
     wname = max(len("SKILL"), max(len(r["skill"]) for r in rows))
 
     if not show_context:
-        print(f"{'SKILL':<{wname}}  {'INVOC':>5}  {'PROJ':>4}  {'FIRST':>10}  {'LAST':>10}")
-        print(f"{'-' * wname}  {'-'*5}  {'-'*4}  {'-'*10}  {'-'*10}")
+        print(f"{'HOST':<6}  {'SKILL':<{wname}}  {'EVIDENCE':<23}  {'EVENTS':>6}  {'PROJ':>4}  {'FIRST':>10}  {'LAST':>10}")
+        print(f"{'-'*6}  {'-' * wname}  {'-'*23}  {'-'*6}  {'-'*4}  {'-'*10}  {'-'*10}")
         for r in rows:
-            print(f"{r['skill']:<{wname}}  {r['invocations']:>5}  {r['projects']:>4}  "
+            print(f"{r['host']:<6}  {r['skill']:<{wname}}  {r['evidence']:<23}  {r['events']:>6}  {r['projects']:>4}  "
                   f"{r['first_seen']:>10}  {r['last_seen']:>10}")
     else:
         # Cramming skill / counts / project / a free-text context into one
@@ -348,9 +665,9 @@ def view_leaderboard(events, as_json, show_context=False):
         width = shutil.get_terminal_size(fallback=(100, 24)).columns
         ctx_width = max(40, width - 4)
         for r in rows:
-            plural = "s" if r["invocations"] != 1 else ""
+            plural = "s" if r["events"] != 1 else ""
             header = (
-                f"{r['skill']}  ({r['invocations']} invocation{plural}, "
+                f"{r['host']}:{r['skill']}  ({r['events']} {r['evidence']} event{plural}, "
                 f"{r['projects']} project{'s' if r['projects'] != 1 else ''}, "
                 f"last {r['last_seen']}"
             )
@@ -363,7 +680,10 @@ def view_leaderboard(events, as_json, show_context=False):
                 ctx = ctx[:ctx_width - 3] + "..."
             print(f"  -> {ctx}")
 
-    print(f"\n{sum(counts.values())} invocations across {len(counts)} skills.")
+    exact = sum(n for (_, _, evidence), n in counts.items() if evidence in EXACT_EVIDENCE)
+    inferred = sum(n for (_, _, evidence), n in counts.items() if evidence == "observed_load")
+    print(f"\n{exact} exact invocations, {inferred} inferred loads across "
+          f"{len({e['skill'] for e in events})} skills.")
 
 
 def view_detail(events, skill, as_json, show_context=False):
@@ -372,18 +692,25 @@ def view_detail(events, skill, as_json, show_context=False):
     by_day = Counter(fmt_day(e["ts"]) for e in hits)
     by_args = Counter(e["args"] for e in hits if e["args"])
     sessions = {e["session"] for e in hits}
+    by_host = Counter(e["host"] for e in hits)
+    by_evidence = Counter(e["evidence"] for e in hits)
+    exact = sum(n for evidence, n in by_evidence.items() if evidence in EXACT_EVIDENCE)
 
     if as_json:
         print(json.dumps({
             "skill": skill,
-            "invocations": len(hits),
+            "invocations": exact,
+            "observed_loads": by_evidence.get("observed_load", 0),
             "sessions": len(sessions),
+            "by_host": dict(by_host.most_common()),
+            "by_evidence": dict(by_evidence.most_common()),
             "by_project": dict(by_project.most_common()),
             "by_day": dict(sorted(by_day.items())),
             "by_args": dict(by_args.most_common()),
             "recent": [
                 {
-                    "ts": e["ts"], "project": e["project"], "session": e["session"],
+                    "ts": e["ts"], "host": e["host"], "evidence": e["evidence"],
+                    "project": e["project"], "session": e["session"],
                     "args": e["args"], "context": e["context"],
                 }
                 for e in sorted(
@@ -395,11 +722,18 @@ def view_detail(events, skill, as_json, show_context=False):
         return
 
     if not hits:
-        print(f"No invocations of '{skill}'.")
+        print(f"No usage evidence for '{skill}'.")
         return
 
-    print(f"{skill}: {len(hits)} invocations across {len(sessions)} sessions\n")
-    print("By project:")
+    print(f"{skill}: {exact} exact invocations, "
+          f"{by_evidence.get('observed_load', 0)} inferred loads across {len(sessions)} sessions\n")
+    print("By evidence:")
+    for evidence, n in by_evidence.most_common():
+        print(f"  {n:>4}  {evidence}")
+    print("\nBy host:")
+    for host, n in by_host.most_common():
+        print(f"  {n:>4}  {host}")
+    print("\nBy project:")
     for proj, n in by_project.most_common():
         print(f"  {n:>4}  {proj}")
     if by_args:
@@ -422,7 +756,7 @@ def view_detail(events, skill, as_json, show_context=False):
             when = dt.strftime("%Y-%m-%d %H:%M")
             sid = e["session"][:8]
             ctx = e["context"] or "(no preceding user message found)"
-            print(f"  {when}  {e['project']}  session {sid}")
+            print(f"  {when}  {e['host']}  {e['evidence']}  {e['project']}  session {sid}")
             print(f"    -> {ctx}")
 
 
@@ -435,6 +769,7 @@ def view_recent(events, limit, as_json, show_context=False):
     if as_json:
         print(json.dumps([{
             "ts": e["ts"], "skill": e["skill"], "args": e["args"],
+            "host": e["host"], "evidence": e["evidence"],
             "project": e["project"], "session": e["session"],
             "subagent": e["subagent"], "context": e["context"],
         } for e in picked], indent=2))
@@ -451,7 +786,8 @@ def view_recent(events, limit, as_json, show_context=False):
         tag = " (subagent)" if e["subagent"] else ""
         arg = f" [{e['args']}]" if e["args"] else ""
         sid = e["session"][:8]
-        print(f"{when}  {e['skill']:<{wname}}{arg}  {e['project']}{tag}  session {sid}")
+        print(f"{when}  {e['host']:<6}  {e['evidence']:<23}  "
+              f"{e['skill']:<{wname}}{arg}  {e['project']}{tag}  session {sid}")
         if show_context:
             ctx = e["context"] or "(no preceding user message found)"
             print(f"  -> {ctx}")
@@ -464,8 +800,7 @@ def view_recent(events, limit, as_json, show_context=False):
 def build_parser():
     p = argparse.ArgumentParser(
         prog="cc-skill-usage",
-        description="Retroactive Claude Code Skill usage analytics "
-                    "(reads ~/.claude/projects transcripts).",
+        description="Cross-client Skill usage analytics with explicit evidence classes.",
     )
     p.add_argument("skill", nargs="?", help="show detail for one skill")
     p.add_argument("--all", nargs=2, metavar=("MODE", "N"),
@@ -479,6 +814,10 @@ def build_parser():
                         "--project aristote")
     p.add_argument("--include-subagents", action="store_true",
                    help="also count invocations made inside subagents")
+    p.add_argument("--host", choices=("claude", "codex", "all"), default="all",
+                   help="limit evidence to one host (default: all)")
+    p.add_argument("--include-inferred-codex", action="store_true",
+                   help="include observed Codex SKILL.md reads as inferred evidence")
     p.add_argument("--show-context", action="store_true",
                    help="show the user message that preceded each invocation: "
                         "an indented context line under each skill on the "
@@ -494,11 +833,36 @@ def build_parser():
     return p
 
 
+def build_load_parser():
+    p = argparse.ArgumentParser(
+        prog="cc-skill-usage load",
+        description="Validate and print one Codex skill, then append exact local evidence.",
+    )
+    p.add_argument("--skill", required=True, help="runtime skill name")
+    p.add_argument("--path", required=True, help="absolute path to SKILL.md")
+    p.add_argument("--session-id", help="Codex thread/session identifier")
+    p.add_argument("--subagent", action="store_true", help="mark invocation as subagent-owned")
+    return p
+
+
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "load":
+        try:
+            return load_skill_command(build_load_parser().parse_args(argv[1:]))
+        except (OSError, UnicodeError, ValueError) as error:
+            sys.stderr.write(f"load failed: {error}\n")
+            return 2
+
     args = build_parser().parse_args(argv)
 
     t0 = time.time()
-    events = collect_events(no_cache=args.no_cache, rebuild=args.rebuild)
+    events, diagnostics = collect_events(
+        host=args.host,
+        include_inferred_codex=args.include_inferred_codex,
+        no_cache=args.no_cache,
+        rebuild=args.rebuild,
+    )
     events = apply_filters(events, args)
     elapsed = time.time() - t0
 
@@ -520,6 +884,10 @@ def main(argv=None):
 
     if not args.json and os.environ.get("CC_SKILL_USAGE_TIMING"):
         sys.stderr.write(f"\nscanned in {elapsed:.2f}s\n")
+    if diagnostics["malformed_event_lines"]:
+        sys.stderr.write(
+            f"Skipped {diagnostics['malformed_event_lines']} malformed event-log line(s).\n"
+        )
     return 0
 
 
