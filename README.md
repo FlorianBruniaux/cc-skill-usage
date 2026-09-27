@@ -257,3 +257,33 @@ These projects extend the workflow without duplicating this tool:
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Codex and project skills
+
+Load a skill and record an instrumented event locally:
+
+```bash
+cc-skill-usage load --skill example --path "$PWD/.agents/skills/example/SKILL.md"
+cc-skill-usage --host codex
+cc-skill-usage --host claude
+cc-skill-usage --host all --include-inferred-codex
+```
+
+The loader prints the complete skill unchanged. It accepts `.agents/skills`,
+`.claude/skills`, and `.codex/skills` between the current directory and its Git
+checkout root, including linked worktrees. Global skill directories and the
+Claude/Codex plugin caches are also accepted. Outside Git, project roots are
+limited to the current directory. Root and file symlinks cannot authorize
+another checkout. Set `CC_SKILL_ROOTS` to an explicit path-separated allowlist
+when a different layout is needed; it replaces automatic root discovery.
+
+Instrumented Codex events are stored in
+`~/.local/state/ai-agents/skill-usage/events.jsonl`; override this path with
+`CC_SKILL_USAGE_EVENT_LOG`. Events contain identifiers and evidence metadata,
+not skill bodies or prompts. A loader event records a validated read, not proof
+that the model followed the skill. Historical successful reads remain inferred
+and are included only with `--include-inferred-codex`.
+
+Reports default to both hosts, with host and evidence labels. Exact counts and
+inferred loads are reported separately. This CLI does not change Codex's native
+catalogue budget or install hooks.
