@@ -173,7 +173,11 @@ def load_skill_command(args):
         "project": Path.cwd().name,
         "subagent": bool(args.subagent),
     }
-    append_event(event)
+    try:
+        append_event(event)
+    except (OSError, ValueError) as error:
+        # Analytics failure must not block access to an already validated skill.
+        sys.stderr.write(f"warning: usage event recording unconfirmed: {error}\n")
     sys.stdout.write(content)
     return 0
 

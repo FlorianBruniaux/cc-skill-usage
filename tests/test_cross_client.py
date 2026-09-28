@@ -83,6 +83,19 @@ class CrossClientUsageTest(unittest.TestCase):
         self.assertEqual(len(events), 1)
         self.assertEqual(malformed, 1)
 
+    def test_unwritable_log_preserves_skill_access_without_exact_event(self):
+        from contextlib import redirect_stderr
+        usage.EVENT_LOG = Path(self.temp.name)
+        args = argparse.Namespace(skill="flow-lean", path=str(self.skill),
+                                  session_id="test", subagent=False)
+        output, errors = io.StringIO(), io.StringIO()
+        with redirect_stdout(output), redirect_stderr(errors):
+            result = usage.load_skill_command(args)
+        self.assertEqual(result, 0)
+        self.assertEqual(output.getvalue(), self.content)
+        self.assertIn("usage event recording unconfirmed", errors.getvalue())
+        self.assertTrue(usage.EVENT_LOG.is_dir())
+
     def test_non_object_event_lines_are_skipped(self):
         usage.EVENT_LOG.parent.mkdir(parents=True)
         usage.EVENT_LOG.write_text('[]\nnull\n42\n', encoding="utf-8")
