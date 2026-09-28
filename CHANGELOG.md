@@ -9,6 +9,12 @@ adheres to semantic versioning.
 
 ## [Unreleased]
 
+### Fixed
+- A denied usage-log write no longer blocks an already validated skill read.
+  The loader prints the skill and warns that event recording is unconfirmed.
+  A regression test reproduces the log-write failure; all 17 tests pass.
+
+
 ### Added
 - Codex skill loading through `load --skill NAME --path PATH`, with local
   instrumented events kept separate from native Claude invocations and
